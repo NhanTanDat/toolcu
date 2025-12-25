@@ -1,9 +1,10 @@
-# 🔧 Fix Lỗi: "No module named 'pywinauto'"
+# 🔧 Fix Lỗi Import: "No module named 'pywinauto' / 'pyperclip'"
 
 ## ❌ Lỗi Gặp Phải
 
 ```
 ERROR: Cannot import modules (core.downloadTool.*): No module named 'pywinauto'
+ERROR: Cannot import modules (core.downloadTool.*): No module named 'pyperclip'
 ```
 
 ## ✅ Giải Pháp (Đã Fix!)
@@ -81,10 +82,10 @@ except ImportError:
 ```
 
 **File đã fix:**
-- ✅ `core/downloadTool/get_link.py`
-- ✅ `core/downloadTool/down_by_yt.py`
-- ✅ `core/downloadTool/init_sub_app.py`
-- ✅ `core/premierCore/control.py`
+- ✅ `core/downloadTool/get_link.py` (pywinauto optional)
+- ✅ `core/downloadTool/down_by_yt.py` (pywinauto + pyperclip optional)
+- ✅ `core/downloadTool/init_sub_app.py` (pywinauto optional)
+- ✅ `core/premierCore/control.py` (pywinauto + pyperclip optional)
 
 ## 📋 Tóm Tắt
 
@@ -97,4 +98,9 @@ except ImportError:
 
 ---
 
-Commit: `1dc5b63` - fix: Make pywinauto imports optional to support Gemini-only mode
+## 📝 Git Commits
+
+- `1dc5b63` - fix: Make pywinauto imports optional to support Gemini-only mode
+- `b602a9f` - fix: Make pyperclip import optional
+
+**All fixes pushed to:** `claude/fix-genmini-autodownload-rG8yt`
