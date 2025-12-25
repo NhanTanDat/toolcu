@@ -1,5 +1,8 @@
 .venv/
 
+# API Keys - NEVER COMMIT
+.env
+
 *.exe
 *.pyc
 *.txt

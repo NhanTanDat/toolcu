@@ -8,11 +8,18 @@ Tính năng:
  - Giới hạn số video / keyword (max_per_keyword).
  - Lọc theo thời lượng tối đa (max_minutes) nếu cung cấp.
  - Lọc theo thời lượng tối thiểu (min_minutes) nếu cung cấp.
+ - HỖ TRỢ GEMINI API: Tự động sử dụng Gemini API nếu có API key trong .env
 
 Luồng chính tách riêng:
  - get_links_main_video: Chỉ thu link video YouTube.
  - get_links_main_image: Chỉ thu link ảnh Google Images.
  - get_links_main: Giữ tương thích cũ, gọi lần lượt 2 luồng trên.
+
+GEMINI MODE:
+ - Nếu có GEMINI_API_KEY trong .env, sẽ tự động dùng get_link_gemini.py
+ - Không cần Selenium, chạy hoàn toàn trong terminal
+ - Sử dụng YouTube Data API hoặc youtubesearchpython
+ - Sử dụng Gemini với Google Search grounding cho images
 """
 
 from selenium import webdriver
@@ -25,6 +32,22 @@ from typing import List, Optional
 import re
 import os
 from pywinauto.keyboard import send_keys
+
+# Check if Gemini API is available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    _GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
+    _USE_GEMINI = bool(_GEMINI_API_KEY)
+    if _USE_GEMINI:
+        print("[get_link] GEMINI API DETECTED - Will use Gemini-powered search")
+        try:
+            from . import get_link_gemini
+        except ImportError:
+            import get_link_gemini
+except Exception as e:
+    _USE_GEMINI = False
+    print(f"[get_link] Gemini API not available, using Selenium mode: {e}")
 
 
 def init_driver(headless: bool = False):
@@ -388,7 +411,21 @@ def get_links_main_video(
     <link 2>
     ...
     """
-    print("[get_link] === START get_links_main_video ===")
+    # GEMINI MODE: Redirect to Gemini-powered search
+    if _USE_GEMINI:
+        print("[get_link] Using GEMINI API mode for video search")
+        return get_link_gemini.get_links_main_video(
+            keywords_file=keywords_file,
+            output_txt=output_txt,
+            project_name=project_name,
+            max_per_keyword=max_per_keyword,
+            max_minutes=max_minutes,
+            min_minutes=min_minutes,
+            use_gemini_optimize=True,
+        )
+
+    # SELENIUM MODE (original)
+    print("[get_link] === START get_links_main_video (Selenium mode) ===")
     print(f"[get_link] keywords_file = {keywords_file}")
     print(f"[get_link] output_txt    = {output_txt}")
     if project_name:
@@ -458,7 +495,19 @@ def get_links_main_image(
     <link ảnh 2>
     ...
     """
-    print("[get_link] === START get_links_main_image ===")
+    # GEMINI MODE: Redirect to Gemini-powered search
+    if _USE_GEMINI:
+        print("[get_link] Using GEMINI API mode for image search")
+        return get_link_gemini.get_links_main_image(
+            keywords_file=keywords_file,
+            output_txt=output_txt,
+            project_name=project_name,
+            images_per_keyword=images_per_keyword,
+            use_gemini_optimize=True,
+        )
+
+    # SELENIUM MODE (original)
+    print("[get_link] === START get_links_main_image (Selenium mode) ===")
     print(f"[get_link] keywords_file = {keywords_file}")
     print(f"[get_link] output_txt    = {output_txt}")
     if project_name:
