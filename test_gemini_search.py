@@ -22,7 +22,7 @@ load_dotenv()
 def test_video_search():
     """Test search YouTube videos với Gemini API."""
     print("\n" + "="*60)
-    print("TEST: YouTube Video Search với Gemini API")
+    print("TEST: YouTube Video Search (CHỈ DÙNG GEMINI API)")
     print("="*60 + "\n")
 
     keyword = "python programming tutorial"
@@ -31,7 +31,7 @@ def test_video_search():
     print(f"Duration: 4-20 minutes\n")
 
     try:
-        links = get_link_gemini.get_youtube_videos_with_api(
+        links = get_link_gemini.get_youtube_links_with_gemini(
             keyword=keyword,
             max_results=3,
             max_minutes=20,
@@ -46,13 +46,15 @@ def test_video_search():
 
     except Exception as e:
         print(f"\n✗ Lỗi: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
 def test_image_search():
     """Test search Google Images với Gemini API."""
     print("\n" + "="*60)
-    print("TEST: Google Image Search với Gemini API")
+    print("TEST: Google Image Search (CHỈ DÙNG GEMINI API)")
     print("="*60 + "\n")
 
     keyword = "beautiful landscape"
@@ -73,34 +75,41 @@ def test_image_search():
 
     except Exception as e:
         print(f"\n✗ Lỗi: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
-def test_query_optimization():
-    """Test Gemini query optimization."""
+def test_gemini_basic():
+    """Test Gemini API connection."""
     print("\n" + "="*60)
-    print("TEST: Gemini Query Optimization")
+    print("TEST: Gemini API Connection")
     print("="*60 + "\n")
 
-    keywords = [
-        "cat",
-        "beautiful sunset",
-        "how to cook pasta"
-    ]
+    print("Checking if Gemini API is accessible...\n")
 
-    print("Testing query optimization:\n")
+    try:
+        import google.generativeai as genai
+        api_key = os.getenv('GEMINI_API_KEY', '')
 
-    for keyword in keywords:
-        try:
-            optimized = get_link_gemini.optimize_search_query_with_gemini(
-                keyword=keyword,
-                search_type='video'
-            )
-            print(f"  '{keyword}' -> '{optimized}'")
-        except Exception as e:
-            print(f"  '{keyword}' -> ERROR: {e}")
+        if not api_key:
+            print("✗ No API key found")
+            return False
 
-    return True
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+        response = model.generate_content("Say hello in 3 words")
+        print(f"✓ Gemini API works!")
+        print(f"  Response: {response.text.strip()}\n")
+
+        return True
+
+    except Exception as e:
+        print(f"✗ Gemini API error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 def test_full_workflow():
@@ -171,29 +180,29 @@ def main():
     """Main test function."""
     print("\n" + "="*60)
     print("GEMINI API SEARCH - TEST SUITE")
+    print("CHỈ CẦN 1 API KEY DUY NHẤT!")
     print("="*60)
 
     # Check API key
     gemini_key = os.getenv('GEMINI_API_KEY', '')
-    youtube_key = os.getenv('YOUTUBE_API_KEY', '')
 
     print(f"\nGEMINI_API_KEY: {'✓ Found' if gemini_key else '✗ Not found'}")
-    print(f"YOUTUBE_API_KEY: {'✓ Found' if youtube_key else '✗ Not found (will use fallback)'}")
 
     if not gemini_key:
         print("\n⚠️  WARNING: GEMINI_API_KEY not found in .env file!")
-        print("Please add your Gemini API key to the .env file to test this feature.")
-        print("\nTo get API key:")
+        print("\n📝 Setup trong 2 phút:")
         print("  1. Visit: https://makersuite.google.com/app/apikey")
-        print("  2. Create a new API key")
-        print("  3. Add to .env: GEMINI_API_KEY=your_key_here")
+        print("  2. Create a new API key (MIỄN PHÍ)")
+        print("  3. Copy file: cp .env.example .env")
+        print("  4. Edit .env và paste: GEMINI_API_KEY=your_key_here")
+        print("\n💡 CHỈ CẦN GEMINI API - không cần YouTube API hay Google Custom Search API!")
         return
 
     # Run tests
     tests = [
-        ("Query Optimization", test_query_optimization),
+        ("Gemini Connection", test_gemini_basic),
         ("Video Search", test_video_search),
-        # ("Image Search", test_image_search),  # Commented out - requires more setup
+        ("Image Search", test_image_search),
         ("Full Workflow", test_full_workflow),
     ]
 
