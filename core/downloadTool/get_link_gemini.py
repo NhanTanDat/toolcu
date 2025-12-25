@@ -309,11 +309,99 @@ Example format:
 
 
 
+def extract_video_id_from_url(url: str) -> Optional[str]:
+    """Extract YouTube video ID from URL."""
+    if not url:
+        return None
+
+    # Standard watch URL
+    match = re.search(r'[?&]v=([A-Za-z0-9_-]{11})', url)
+    if match:
+        return match.group(1)
+
+    # Shortened youtu.be URL
+    match = re.search(r'youtu\.be/([A-Za-z0-9_-]{11})', url)
+    if match:
+        return match.group(1)
+
+    # Shorts URL
+    match = re.search(r'/shorts/([A-Za-z0-9_-]{11})', url)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def get_image_links_from_youtube_thumbnails(
+    keyword: str,
+    num_images: int = 10,
+) -> List[str]:
+    """Lấy YouTube thumbnails làm images (NHANH, MIỄN PHÍ, KHÔNG TỐN QUOTA).
+
+    Sử dụng yt-dlp search và lấy thumbnail từ video IDs.
+
+    Args:
+        keyword: Search keyword
+        num_images: Số ảnh cần lấy
+
+    Returns:
+        List of YouTube thumbnail URLs
+    """
+    if not _HAS_YT_DLP:
+        print("[get_link_gemini] yt_dlp not available for image thumbnails")
+        return []
+
+    try:
+        # Search videos
+        query = f"ytsearch{num_images + 5}:{keyword}"
+        ydl_opts = {
+            "quiet": True,
+            "skip_download": True,
+            "extract_flat": True,
+            "ignoreerrors": True,
+        }
+
+        thumbnails = []
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(query, download=False) or {}
+            for entry in (info.get("entries") or []):
+                if len(thumbnails) >= num_images:
+                    break
+
+                if not isinstance(entry, dict):
+                    continue
+
+                video_id = entry.get("id")
+                if not video_id:
+                    # Try extract from URL
+                    url = entry.get("url") or entry.get("webpage_url")
+                    if url:
+                        video_id = extract_video_id_from_url(url)
+
+                if video_id:
+                    # Use maxresdefault for best quality
+                    thumb_url = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+                    thumbnails.append(thumb_url)
+
+        print(f"[get_link_gemini] Found {len(thumbnails)} YouTube thumbnails for '{keyword}'")
+        return thumbnails
+
+    except Exception as e:
+        print(f"[get_link_gemini] ERROR getting YouTube thumbnails: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
 def get_image_links_with_gemini(
     keyword: str,
     num_images: int = 10,
 ) -> List[str]:
-    """Sử dụng Gemini API để tìm Google Image links.
+    """Lấy image links - ƯU TIÊN YouTube thumbnails (nhanh, miễn phí).
+
+    Method:
+    1. Dùng yt-dlp search YouTube → lấy thumbnails (KHUYẾN NGHỊ)
+    2. Fallback: Gemini search (nếu không có yt-dlp)
 
     Args:
         keyword: Search keyword
@@ -322,74 +410,14 @@ def get_image_links_with_gemini(
     Returns:
         List of image URLs
     """
-    if not GEMINI_API_KEY:
-        print("[get_link_gemini] ERROR: No GEMINI_API_KEY found!")
-        return []
+    # Method 1: YouTube thumbnails (NHANH, MIỄN PHÍ, KHÔNG TỐN QUOTA)
+    if _HAS_YT_DLP:
+        return get_image_links_from_youtube_thumbnails(keyword, num_images)
 
-    try:
-        # Sử dụng Gemini với Google Search grounding
-        model = genai.GenerativeModel(
-            'gemini-2.0-flash-exp',
-            tools='google_search_retrieval'
-        )
-
-        prompt = f"""Search Google Images for "{keyword}" and find {num_images} direct image URLs.
-
-IMPORTANT: Return ONLY a JSON array of direct image URLs (actual image files, not webpage links).
-Format: ["https://example.com/image1.jpg", "https://example.com/image2.png", ...]
-
-Requirements:
-- Must be direct links to image files (.jpg, .jpeg, .png, .webp, .gif)
-- High quality images (preferably > 500px width)
-- No thumbnails, no data: URIs, no encrypted links
-- Actual downloadable image URLs
-
-Example format:
-["https://example.com/photo.jpg", "https://site.com/pic.png"]"""
-
-        print(f"[get_link_gemini] Searching Google Images for '{keyword}'...")
-        response = model.generate_content(prompt)
-
-        # Parse JSON response
-        text = response.text.strip()
-
-        # Extract JSON array
-        json_match = re.search(r'\[.*?\]', text, re.DOTALL)
-        if json_match:
-            try:
-                urls = json.loads(json_match.group())
-                if isinstance(urls, list):
-                    # Filter valid image URLs
-                    valid_urls = []
-                    for url in urls:
-                        if isinstance(url, str) and url.startswith('http'):
-                            # Check if it's likely an image URL
-                            if any(ext in url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif']):
-                                valid_urls.append(url)
-                            # Also accept URLs without extension (might be dynamic)
-                            elif '/image' in url.lower() or '/photo' in url.lower():
-                                valid_urls.append(url)
-
-                    print(f"[get_link_gemini] Found {len(valid_urls)} image URLs for '{keyword}'")
-                    return valid_urls[:num_images]
-            except json.JSONDecodeError as e:
-                print(f"[get_link_gemini] JSON parse error: {e}")
-
-        # Fallback: extract any image URLs from response
-        image_pattern = r'https?://[^\s"\'<>]+\.(?:jpg|jpeg|png|webp|gif)'
-        fallback_urls = re.findall(image_pattern, text, re.IGNORECASE)
-        if fallback_urls:
-            print(f"[get_link_gemini] Found {len(fallback_urls)} image URLs (fallback extraction)")
-            return list(set(fallback_urls))[:num_images]
-
-        print(f"[get_link_gemini] No image URLs found for '{keyword}'")
-        return []
-
-    except Exception as e:
-        print(f"[get_link_gemini] ERROR getting images: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
+    # Method 2: Gemini search (fallback - nhưng đang bị deprecated)
+    print("[get_link_gemini] WARNING: YouTube thumbnail method not available, cannot get images")
+    print("[get_link_gemini] Please install yt-dlp: pip install yt-dlp")
+    return []
 
 
 
