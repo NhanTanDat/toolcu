@@ -11,10 +11,22 @@ except ImportError:
         pass
 
 from contextlib import redirect_stdout
-import pyperclip
 from time import sleep
 import os
 import sys
+
+# Try import pyperclip (optional, only needed for clipboard operations)
+try:
+    import pyperclip
+    _HAS_PYPERCLIP = True
+except ImportError:
+    _HAS_PYPERCLIP = False
+    # Dummy pyperclip module when not installed
+    class pyperclip:
+        @staticmethod
+        def copy(text):
+            """Dummy copy when pyperclip not installed."""
+            pass
 
 """
 Lý do lỗi ImportError (attempted relative import with no known parent package):

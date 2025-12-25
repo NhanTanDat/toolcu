@@ -11,8 +11,20 @@ except ImportError:
         pass
 
 from time import sleep
-import pyperclip
 import os
+
+# Try import pyperclip (optional, only needed for clipboard operations)
+try:
+    import pyperclip
+    _HAS_PYPERCLIP = True
+except ImportError:
+    _HAS_PYPERCLIP = False
+    # Dummy pyperclip module when not installed
+    class pyperclip:
+        @staticmethod
+        def copy(text):
+            """Dummy copy when pyperclip not installed."""
+            pass
 
 
 def copy_paste(path):
