@@ -26,6 +26,195 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
+# Try import yt_dlp for faster search (optional)
+try:
+    from yt_dlp import YoutubeDL
+    _HAS_YT_DLP = True
+except ImportError:
+    _HAS_YT_DLP = False
+    YoutubeDL = None
+
+
+def get_youtube_links_with_ytdlp(
+    keyword: str,
+    max_results: int = 10,
+    max_minutes: Optional[int] = None,
+    min_minutes: Optional[int] = None,
+    use_ai_filter: bool = True,
+) -> List[str]:
+    """Sử dụng yt_dlp để tìm YouTube videos (NHANH NHẤT, KHÔNG CẦN GEMINI API cho search).
+
+    Args:
+        keyword: Search keyword
+        max_results: Số video tối đa
+        max_minutes: Thời lượng tối đa (phút)
+        min_minutes: Thời lượng tối thiểu (phút)
+        use_ai_filter: Dùng Gemini AI để filter kết quả (optional)
+
+    Returns:
+        List of YouTube video URLs
+    """
+    if not _HAS_YT_DLP:
+        print("[get_link_gemini] yt_dlp not installed, falling back to Gemini search")
+        return get_youtube_links_with_gemini(keyword, max_results, max_minutes, min_minutes)
+
+    try:
+        # Search nhiều hơn để filter bằng AI
+        search_count = max_results * 3 if use_ai_filter and GEMINI_API_KEY else max_results + 5
+
+        query = f"ytsearch{search_count}:{keyword}"
+        ydl_opts = {
+            "quiet": True,
+            "skip_download": True,
+            "default_search": "ytsearch",
+            "noplaylist": True,
+            "extract_flat": True,  # Fast mode - không download metadata đầy đủ
+            "ignoreerrors": True,
+        }
+
+        videos = []
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(query, download=False) or {}
+            for entry in (info.get("entries") or []):
+                if not isinstance(entry, dict):
+                    continue
+
+                url = entry.get("url") or entry.get("webpage_url") or entry.get("id")
+                if not url:
+                    continue
+
+                if not url.startswith("http"):
+                    url = f"https://www.youtube.com/watch?v={url}"
+
+                title = entry.get("title") or ""
+                duration = entry.get("duration")  # seconds
+                channel = entry.get("channel") or entry.get("uploader") or ""
+
+                # Filter by duration
+                if duration:
+                    if max_minutes and duration > max_minutes * 60:
+                        continue
+                    if min_minutes and duration < min_minutes * 60:
+                        continue
+
+                videos.append({
+                    "url": url,
+                    "title": title,
+                    "duration_seconds": duration,
+                    "channel": channel
+                })
+
+        print(f"[get_link_gemini] yt_dlp found {len(videos)} videos for '{keyword}'")
+
+        # AI filtering với Gemini
+        if use_ai_filter and GEMINI_API_KEY and len(videos) > max_results:
+            print(f"[get_link_gemini] Using Gemini AI to filter top {max_results} videos...")
+            filtered = filter_videos_with_gemini_ai(keyword, videos, max_results)
+            return [v["url"] for v in filtered]
+
+        # Return URLs
+        return [v["url"] for v in videos[:max_results]]
+
+    except Exception as e:
+        print(f"[get_link_gemini] ERROR with yt_dlp: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+def filter_videos_with_gemini_ai(
+    keyword: str,
+    candidates: List[Dict[str, Any]],
+    max_keep: int = 10,
+) -> List[Dict[str, Any]]:
+    """Dùng Gemini AI để filter videos phù hợp nhất.
+
+    Args:
+        keyword: Search keyword
+        candidates: List of video dicts with url, title, duration_seconds, channel
+        max_keep: Số video giữ lại
+
+    Returns:
+        Filtered list of videos
+    """
+    if not GEMINI_API_KEY:
+        return candidates[:max_keep]
+
+    if len(candidates) <= max_keep:
+        return candidates
+
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+        # Build video list text
+        items_text = []
+        for idx, video in enumerate(candidates):
+            title = video.get("title", "")
+            duration = video.get("duration_seconds")
+            channel = video.get("channel", "")
+            url = video.get("url", "")
+
+            dur_str = f"{int(duration)}s" if duration else "unknown"
+            items_text.append(f"{idx}. title='{title}', duration={dur_str}, channel='{channel}', url={url}")
+
+        items_str = "\n".join(items_text)
+
+        prompt = f"""Keyword: {keyword}
+
+Below is a list of candidate YouTube videos from a search.
+Each line shows: index, title, duration (seconds), channel, url
+
+{items_str}
+
+Task:
+- Pick at most {max_keep} videos that best match the keyword "{keyword}"
+- Prefer videos that are:
+  * Clearly about the keyword
+  * Not 'live', 'premiere', 'upcoming', or spam compilation
+  * Reasonable length (not several hours unless keyword implies that)
+  * High quality content
+
+Return STRICT JSON with this structure ONLY:
+{{
+  "keep_indices": [0, 3, 5, ...]
+}}
+
+If none are good, return: {{ "keep_indices": [] }}"""
+
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+
+        # Extract JSON
+        json_match = re.search(r'\{.*?\}', text, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group())
+            indices = data.get("keep_indices", [])
+
+            if isinstance(indices, list):
+                # Filter valid indices
+                valid_indices = []
+                seen = set()
+                for idx in indices:
+                    try:
+                        i = int(idx)
+                        if 0 <= i < len(candidates) and i not in seen:
+                            valid_indices.append(i)
+                            seen.add(i)
+                    except:
+                        pass
+
+                if valid_indices:
+                    result = [candidates[i] for i in valid_indices]
+                    print(f"[get_link_gemini] AI filtered {len(candidates)} -> {len(result)} videos")
+                    return result
+
+        print(f"[get_link_gemini] AI filtering failed, using top {max_keep}")
+        return candidates[:max_keep]
+
+    except Exception as e:
+        print(f"[get_link_gemini] ERROR in AI filtering: {e}")
+        return candidates[:max_keep]
+
 
 def get_youtube_links_with_gemini(
     keyword: str,
@@ -286,12 +475,23 @@ def get_links_main_video(
         print(f"[get_link_gemini] --- ({idx}/{len(keywords)}) '{keyword}' ---")
 
         try:
-            video_links = get_youtube_links_with_gemini(
-                keyword,
-                max_results=max_per_keyword,
-                max_minutes=max_minutes,
-                min_minutes=min_minutes,
-            )
+            # Ưu tiên dùng yt_dlp (nhanh nhất, không cần Gemini API cho search)
+            if _HAS_YT_DLP:
+                video_links = get_youtube_links_with_ytdlp(
+                    keyword,
+                    max_results=max_per_keyword,
+                    max_minutes=max_minutes,
+                    min_minutes=min_minutes,
+                    use_ai_filter=bool(GEMINI_API_KEY),  # Dùng AI filter nếu có Gemini API
+                )
+            else:
+                # Fallback: dùng Gemini search
+                video_links = get_youtube_links_with_gemini(
+                    keyword,
+                    max_results=max_per_keyword,
+                    max_minutes=max_minutes,
+                    min_minutes=min_minutes,
+                )
         except Exception as e:
             print(f"[get_link_gemini] ERROR collecting video links: {e}")
             video_links = []
