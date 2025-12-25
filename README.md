@@ -178,3 +178,4 @@ Bạn có thể mở issue hoặc gửi yêu cầu thêm chức năng.
 ---
 Nếu cần bản tiếng Anh hoặc bổ sung phần nào, hãy yêu cầu thêm.
 
+# toolcu
