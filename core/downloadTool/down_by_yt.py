@@ -1,5 +1,15 @@
-from pywinauto import Application, Desktop
-from pywinauto.keyboard import send_keys
+# Try import pywinauto (required for Premiere automation)
+try:
+    from pywinauto import Application, Desktop
+    from pywinauto.keyboard import send_keys
+    _HAS_PYWINAUTO = True
+except ImportError:
+    _HAS_PYWINAUTO = False
+    Application = None
+    Desktop = None
+    def send_keys(keys):
+        pass
+
 from contextlib import redirect_stdout
 import pyperclip
 from time import sleep

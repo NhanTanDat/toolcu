@@ -1,6 +1,14 @@
 import psutil
 from time import sleep
-from pywinauto import Application, Desktop
+
+# Try import pywinauto (required for Premiere automation)
+try:
+    from pywinauto import Application, Desktop
+    _HAS_PYWINAUTO = True
+except ImportError:
+    _HAS_PYWINAUTO = False
+    Application = None
+    Desktop = None
 
 def _pids_by_exe(exe_path):
     exe_lc = exe_path.lower()

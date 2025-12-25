@@ -31,7 +31,17 @@ from time import sleep
 from typing import List, Optional
 import re
 import os
-from pywinauto.keyboard import send_keys
+
+# Try import pywinauto (optional, only needed for some Selenium features)
+try:
+    from pywinauto.keyboard import send_keys
+    _HAS_PYWINAUTO = True
+except ImportError:
+    _HAS_PYWINAUTO = False
+    # Dummy function if pywinauto not available
+    def send_keys(keys):
+        """Dummy send_keys when pywinauto not installed."""
+        pass
 
 # Check if Gemini API is available
 try:
