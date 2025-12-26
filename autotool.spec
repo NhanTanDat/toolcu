@@ -1,69 +1,56 @@
-# PyInstaller spec file for AutoTool
-import os
-from pathlib import Path
+# -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all
 
-block_cipher = None
+datas = [('core', 'core'), ('GUI', 'GUI'), ('data', 'data')]
+binaries = []
+hiddenimports = ['selenium', 'yt_dlp']
+hiddenimports += collect_submodules('core')
+hiddenimports += collect_submodules('core.downloadTool')
+tmp_ret = collect_all('selenium')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('yt_dlp')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
-project_root = Path(__file__).parent
-entry_script = project_root / 'core' / 'downloadTool' / 'mainGUI.py'
-
-# Collect hidden imports (selenium sometimes dynamic)
-hiddenimports = []
-try:
-    hiddenimports.extend(collect_submodules('selenium'))
-except Exception:
-    pass
-for m in ['pywinauto', 'pyperclip', 'uiautomation']:
-    try:
-        hiddenimports.extend(collect_submodules(m))
-    except Exception:
-        pass
-
-# Data files to bundle (text templates, json)
-datas = []
-
-def add_datas(pattern, target_subdir):
-    for p in project_root.glob(pattern):
-        if p.is_file():
-            datas.append((str(p), str(Path(target_subdir))))
-
-add_datas('core/downloadTool/*.txt', 'core/downloadTool')
-add_datas('core/*.json', 'core')
 
 a = Analysis(
-    [str(entry_script)],
-    pathex=[str(project_root)],
-    binaries=[],
+    ['GUI\\mainGUI.py'],
+    pathex=['.'],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
+    optimize=0,
 )
-
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    name='AutoTool',
+    [],
+    exclude_binaries=True,
+    name='autotool',
     debug=False,
+    bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # Change to True if you want a console window for debugging
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(project_root / 'icon.ico') if (project_root / 'icon.ico').exists() else None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='autotool',
 )

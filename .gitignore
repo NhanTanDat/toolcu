@@ -15,3 +15,9 @@
 # !data/
 !data/path.txt
 !.vscode/*.json
+# build output
+/dist/
+/build/
+/out/
+/release/
+/bin/
