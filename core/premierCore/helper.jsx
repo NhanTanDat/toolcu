@@ -250,7 +250,10 @@ function _findPathTxt() {
         var coreDir = premierCoreDir.parent;
         var rootDir = coreDir.parent;
         if (rootDir) {
+            // Source code location
             possiblePaths.push(_joinPath(rootDir.fsName, 'data/path.txt'));
+            // Built .exe location (dist/autotool/data)
+            possiblePaths.push(_joinPath(rootDir.fsName, 'dist/autotool/data/path.txt'));
         }
     } catch (e) {}
 
@@ -259,6 +262,8 @@ function _findPathTxt() {
         'C:/toolcu/data/path.txt',
         'D:/toolcu/data/path.txt',
         Folder.desktop.fsName + '/toolcu/data/path.txt',
+        Folder.desktop.fsName + '/toolcu/autotool/data/path.txt',
+        Folder.desktop.fsName + '/toolcu/autotool/dist/autotool/data/path.txt',
         Folder.myDocuments.fsName + '/toolcu/data/path.txt'
     ];
 

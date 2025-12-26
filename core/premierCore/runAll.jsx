@@ -269,10 +269,14 @@ function findPathTxt() {
 
     // 1. Try from script location (works when running from VSCode)
     var scriptDir = getThisDir();
+    var rootFromScript = null;
     if (scriptDir) {
-        var rootFromScript = getRootDirFromScript();
+        rootFromScript = getRootDirFromScript();
         if (rootFromScript) {
+            // Source code location
             possiblePaths.push(joinPath(rootFromScript.fsName, 'data/path.txt'));
+            // Built .exe location (dist/autotool/data)
+            possiblePaths.push(joinPath(rootFromScript.fsName, 'dist/autotool/data/path.txt'));
         }
     }
 
@@ -281,6 +285,8 @@ function findPathTxt() {
         'C:/toolcu/data/path.txt',
         'D:/toolcu/data/path.txt',
         Folder.desktop.fsName + '/toolcu/data/path.txt',
+        Folder.desktop.fsName + '/toolcu/autotool/data/path.txt',
+        Folder.desktop.fsName + '/toolcu/autotool/dist/autotool/data/path.txt',
         Folder.myDocuments.fsName + '/toolcu/data/path.txt'
     ];
 
@@ -288,9 +294,13 @@ function findPathTxt() {
         possiblePaths.push(normalizePath(commonPaths[i]));
     }
 
+    // Log all paths being searched
+    log('Searching for path.txt in ' + possiblePaths.length + ' locations...');
+
     // Try each path
     for (var j = 0; j < possiblePaths.length; j++) {
         var p = possiblePaths[j];
+        log('  Checking: ' + p);
         if (fileExists(p)) {
             log('Found path.txt at: ' + p);
             return p;
