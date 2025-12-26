@@ -153,13 +153,28 @@ def _download_group(group_name: str, links: List[str], parent_folder: str, media
         ydl_opts["cookiefile"] = COOKIES_FILE
         print(f"[down_by_yt] Using cookies from file: {COOKIES_FILE}")
     else:
-        # Fallback: Auto-use Chrome cookies (bypass bot detection)
-        try:
-            ydl_opts["cookiesfrombrowser"] = ("chrome",)
-            print("[down_by_yt] Using cookies from Chrome browser (auto-detect)")
-        except Exception:
-            print("[down_by_yt] WARN: No cookies available - may hit bot detection!")
-            print("  → See FIX_YOUTUBE_BOT_DETECTION.md for solution")
+        # Fallback: Auto-use browser cookies (bypass bot detection)
+        # NOTE: Browser must be CLOSED for cookie extraction to work!
+        print("[down_by_yt] Auto-detecting browser cookies...")
+        print("  → IMPORTANT: Close ALL browser windows for this to work!")
+
+        # Try Firefox first (less likely to be locked), then Chrome
+        browsers_to_try = [("firefox",), ("chrome",)]
+        cookies_loaded = False
+
+        for browser in browsers_to_try:
+            try:
+                ydl_opts["cookiesfrombrowser"] = browser
+                print(f"[down_by_yt] Trying cookies from {browser[0]}...")
+                cookies_loaded = True
+                break
+            except Exception:
+                continue
+
+        if not cookies_loaded:
+            print("[down_by_yt] WARN: Could not load browser cookies!")
+            print("  → FIX 1 (EASIEST): Close all Chrome/Firefox windows and retry")
+            print("  → FIX 2: Export cookies to file (see FIX_YOUTUBE_BOT_DETECTION.md)")
 
     if HAS_FFMPEG:
         # ffmpeg_location nên là folder chứa ffmpeg.exe
