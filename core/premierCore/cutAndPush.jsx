@@ -60,41 +60,97 @@ function _parsePathTxt(path) {
 	}
 }
 
+// Try to find path.txt in multiple possible locations (for PyInstaller .exe support)
+function _findPathTxt() {
+	var possiblePaths = [];
+
+	// 1. Try from script location (works when running from VSCode)
+	try {
+		var scriptFile = new File($.fileName);
+		var premierCoreDir = scriptFile.parent;
+		var coreDir = premierCoreDir.parent;
+		var rootDir = coreDir.parent;
+		if (rootDir) {
+			possiblePaths.push(_joinPath(rootDir.fsName, 'data/path.txt'));
+		}
+	} catch (e) {}
+
+	// 2. Try common Windows paths where .exe might be installed
+	var commonPaths = [
+		'C:/toolcu/data/path.txt',
+		'D:/toolcu/data/path.txt',
+		Folder.desktop.fsName + '/toolcu/data/path.txt',
+		Folder.myDocuments.fsName + '/toolcu/data/path.txt'
+	];
+
+	for (var i = 0; i < commonPaths.length; i++) {
+		possiblePaths.push(commonPaths[i].replace(/\\/g, '/'));
+	}
+
+	// Try each path
+	for (var j = 0; j < possiblePaths.length; j++) {
+		var p = possiblePaths[j];
+		if (_fileExists(p)) {
+			$.writeln('[cutAndPush] Found path.txt at: ' + p);
+			return p;
+		}
+	}
+
+	return null;
+}
+
 // ===== Xác định thư mục data theo path.txt =====
 var DATA_FOLDER = (function () {
 	try {
-		// 1) Tìm root (....../projectRoot)
-		var scriptFile = new File($.fileName);      // .../core/premierCore/cutAndPush.jsx
-		var premierCoreDir = scriptFile.parent;     // premierCore
-		var coreDir = premierCoreDir.parent;        // core
-		var rootDir = coreDir.parent;               // project root
+		// Try to find path.txt first (supports PyInstaller .exe)
+		var pathTxt = _findPathTxt();
+		var targetDataPath = null;
+		var rootDataPath = null;
 
-		// 2) Root data folder (để tìm path.txt): <root>/data
-		var rootDataPath = rootDir.fsName + '/data';
-		_ensureFolder(rootDataPath);
-
-		// 3) Đọc data/path.txt (nếu có) để lấy data_folder hoặc project_slug
-		var pathTxt = _joinPath(rootDataPath, 'path.txt');
-		var targetDataPath = rootDataPath; // fallback mặc định
-		if (_fileExists(pathTxt)) {
+		if (pathTxt) {
 			try {
 				var cfg = _parsePathTxt(pathTxt);
+				// Use data_dir from path.txt if available (set by Python GUI)
+				if (cfg && cfg.data_dir) {
+					rootDataPath = String(cfg.data_dir).replace(/\\/g, '/');
+					$.writeln('[DATA_FOLDER] Using data_dir from path.txt: ' + rootDataPath);
+				}
 				// Ưu tiên trường data_folder (có thể là tuyệt đối hoặc tương đối so với root/data)
 				if (cfg && cfg.data_folder) {
-					var df = String(cfg.data_folder);
+					var df = String(cfg.data_folder).replace(/\\/g, '/');
 					if (_folderExists(df)) {
 						targetDataPath = df;
-					} else {
+					} else if (rootDataPath) {
 						targetDataPath = _joinPath(rootDataPath, df);
 					}
-				} else if (cfg && cfg.project_slug) {
+				} else if (cfg && cfg.project_slug && rootDataPath) {
 					targetDataPath = _joinPath(rootDataPath, String(cfg.project_slug));
 				}
 			} catch (eCfg) {
-				$.writeln('[DATA_FOLDER] Lỗi đọc path.txt, dùng fallback root/data. Error: ' + eCfg);
+				$.writeln('[DATA_FOLDER] Lỗi đọc path.txt: ' + eCfg);
 			}
-		} else {
-			$.writeln('[DATA_FOLDER] Không tìm thấy data/path.txt, dùng fallback root/data');
+		}
+
+		// Fallback: try from script location
+		if (!rootDataPath) {
+			try {
+				var scriptFile = new File($.fileName);
+				var premierCoreDir = scriptFile.parent;
+				var coreDir = premierCoreDir.parent;
+				var rootDir = coreDir.parent;
+				rootDataPath = rootDir.fsName + '/data';
+				$.writeln('[DATA_FOLDER] Using rootDataPath from script: ' + rootDataPath);
+			} catch (e) {
+				rootDataPath = Folder.desktop.fsName + '/toolcu/data';
+				$.writeln('[DATA_FOLDER] Fallback rootDataPath to desktop: ' + rootDataPath);
+			}
+		}
+
+		_ensureFolder(rootDataPath);
+
+		// If no specific target, use root data path
+		if (!targetDataPath) {
+			targetDataPath = rootDataPath;
 		}
 
 		_ensureFolder(targetDataPath);

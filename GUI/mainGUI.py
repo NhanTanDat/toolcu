@@ -8,8 +8,26 @@ import json
 # ---------------------------------------------------------------------------
 # Ensure project root (where 'core' lives) is on sys.path
 # ---------------------------------------------------------------------------
-_THIS_DIR = os.path.abspath(os.path.dirname(__file__))
-_ROOT_DIR = os.path.abspath(os.path.join(_THIS_DIR, '..'))  # project root
+# PyInstaller-aware path handling:
+# - When running as .exe: use the directory containing the .exe file
+# - When running from source: use __file__ directory
+def get_application_path():
+    """Get the correct application path for both frozen (.exe) and script mode."""
+    if getattr(sys, 'frozen', False):
+        # Running as compiled .exe - use the .exe's directory
+        return os.path.dirname(sys.executable)
+    else:
+        # Running as script - use __file__ directory
+        return os.path.abspath(os.path.dirname(__file__))
+
+_THIS_DIR = get_application_path()
+# When frozen, _THIS_DIR is already the root (where .exe is)
+# When running as script, we need to go up one level from GUI folder
+if getattr(sys, 'frozen', False):
+    _ROOT_DIR = _THIS_DIR  # .exe is in root folder
+else:
+    _ROOT_DIR = os.path.abspath(os.path.join(_THIS_DIR, '..'))  # project root
+
 DATA_DIR = os.path.join(_ROOT_DIR, 'data')
 if not os.path.isdir(DATA_DIR):
     try:
@@ -18,6 +36,10 @@ if not os.path.isdir(DATA_DIR):
         pass
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
+
+# Store paths for JSX scripts to use
+CORE_DIR = os.path.join(_ROOT_DIR, 'core')
+JSX_DIR = os.path.join(CORE_DIR, 'premierCore')
 
 # Path to persisted config file
 CONFIG_PATH = os.path.join(DATA_DIR, 'config.json')
@@ -613,12 +635,24 @@ class AutoToolGUI(tk.Tk):
         for i, proj_path in enumerate(self.premier_projects, start=1):
             try:
                 self.log2(f"-- ({i}/{len(self.premier_projects)}) {proj_path}")
-                # Update path.txt
+                # Update path.txt with all necessary paths for JSX scripts
                 project_slug = self._derive_project_slug(proj_path)
                 data_folder = os.path.join(DATA_DIR, project_slug).replace('\\', '/')
                 project_path_unix = proj_path.replace('\\', '/')
                 resource_dir = os.path.join(os.path.dirname(proj_path), 'resource').replace('\\', '/')
-                path_txt_content = f"project_slug={project_slug}\ndata_folder={data_folder}\nproject_path={project_path_unix}\nresource_dir={resource_dir}\n"
+                # Include root_dir and jsx_dir for JSX scripts to use directly
+                root_dir_unix = _ROOT_DIR.replace('\\', '/')
+                jsx_dir_unix = JSX_DIR.replace('\\', '/')
+                data_dir_unix = DATA_DIR.replace('\\', '/')
+                path_txt_content = (
+                    f"project_slug={project_slug}\n"
+                    f"data_folder={data_folder}\n"
+                    f"project_path={project_path_unix}\n"
+                    f"resource_dir={resource_dir}\n"
+                    f"root_dir={root_dir_unix}\n"
+                    f"jsx_dir={jsx_dir_unix}\n"
+                    f"data_dir={data_dir_unix}\n"
+                )
                 path_txt_path = os.path.join(DATA_DIR, 'path.txt')
                 try:
                     with open(path_txt_path, 'w', encoding='utf-8') as f:

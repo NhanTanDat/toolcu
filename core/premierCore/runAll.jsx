@@ -251,7 +251,7 @@ function getThisDir() {
     }
 }
 
-function getRootDir() {
+function getRootDirFromScript() {
     var d = getThisDir();
     if (!d) return null;
     try {
@@ -263,19 +263,103 @@ function getRootDir() {
     }
 }
 
-var ROOT_DIR = (function () {
-    var r = getRootDir();
-    if (!r) {
-        log('Cannot resolve ROOT_DIR');
-    }
-    return r ? r.fsName : '';
-})();
+// Try to find path.txt in multiple possible locations
+function findPathTxt() {
+    var possiblePaths = [];
 
-var DATA_DIR = (function () {
-    var p = joinPath(ROOT_DIR, '/data');
-    ensureFolder(p);
-    return p;
-})();
+    // 1. Try from script location (works when running from VSCode)
+    var scriptDir = getThisDir();
+    if (scriptDir) {
+        var rootFromScript = getRootDirFromScript();
+        if (rootFromScript) {
+            possiblePaths.push(joinPath(rootFromScript.fsName, 'data/path.txt'));
+        }
+    }
+
+    // 2. Try common Windows paths where .exe might be installed
+    var commonPaths = [
+        'C:/toolcu/data/path.txt',
+        'D:/toolcu/data/path.txt',
+        Folder.desktop.fsName + '/toolcu/data/path.txt',
+        Folder.myDocuments.fsName + '/toolcu/data/path.txt'
+    ];
+
+    for (var i = 0; i < commonPaths.length; i++) {
+        possiblePaths.push(normalizePath(commonPaths[i]));
+    }
+
+    // Try each path
+    for (var j = 0; j < possiblePaths.length; j++) {
+        var p = possiblePaths[j];
+        if (fileExists(p)) {
+            log('Found path.txt at: ' + p);
+            return p;
+        }
+    }
+
+    return null;
+}
+
+// Read paths from path.txt first, fallback to script-based calculation
+function initializePaths() {
+    var result = {
+        ROOT_DIR: '',
+        DATA_DIR: '',
+        JSX_DIR: ''
+    };
+
+    // First try to find and read path.txt
+    var pathTxtFile = findPathTxt();
+    if (pathTxtFile) {
+        var cfg = parsePathTxt(pathTxtFile);
+        if (cfg) {
+            // Use paths from path.txt if available (set by Python GUI)
+            if (cfg.root_dir && cfg.root_dir !== '') {
+                result.ROOT_DIR = normalizePath(cfg.root_dir);
+                log('Using ROOT_DIR from path.txt: ' + result.ROOT_DIR);
+            }
+            if (cfg.data_dir && cfg.data_dir !== '') {
+                result.DATA_DIR = normalizePath(cfg.data_dir);
+                log('Using DATA_DIR from path.txt: ' + result.DATA_DIR);
+            }
+            if (cfg.jsx_dir && cfg.jsx_dir !== '') {
+                result.JSX_DIR = normalizePath(cfg.jsx_dir);
+                log('Using JSX_DIR from path.txt: ' + result.JSX_DIR);
+            }
+        }
+    }
+
+    // Fallback: calculate from script location if not set
+    if (!result.ROOT_DIR || result.ROOT_DIR === '') {
+        var r = getRootDirFromScript();
+        if (r) {
+            result.ROOT_DIR = r.fsName;
+            log('Using ROOT_DIR from script location: ' + result.ROOT_DIR);
+        } else {
+            log('Cannot resolve ROOT_DIR');
+        }
+    }
+
+    if (!result.DATA_DIR || result.DATA_DIR === '') {
+        result.DATA_DIR = joinPath(result.ROOT_DIR, 'data');
+        log('Using DATA_DIR fallback: ' + result.DATA_DIR);
+    }
+
+    if (!result.JSX_DIR || result.JSX_DIR === '') {
+        result.JSX_DIR = joinPath(joinPath(result.ROOT_DIR, 'core'), 'premierCore');
+        log('Using JSX_DIR fallback: ' + result.JSX_DIR);
+    }
+
+    // Ensure folders exist
+    ensureFolder(result.DATA_DIR);
+
+    return result;
+}
+
+var _PATHS = initializePaths();
+var ROOT_DIR = _PATHS.ROOT_DIR;
+var DATA_DIR = _PATHS.DATA_DIR;
+var JSX_DIR = _PATHS.JSX_DIR;
 
 // ===== Step 1: getTimeline export =====
 function runGetTimelineExport(cfg, projectName) {
@@ -290,9 +374,8 @@ function runGetTimelineExport(cfg, projectName) {
     }
 
     // Run getTimeline.jsx to export timeline to data/timeline_export.csv
-
-    var p = joinPath(joinPath(ROOT_DIR, 'core'), 'premierCore');
-    var script = joinPath(p, 'getTimeline.jsx');
+    // Use JSX_DIR from path.txt or fallback
+    var script = joinPath(JSX_DIR, 'getTimeline.jsx');
     script = normalizePath(script);
     file = new File(script);
     if (!file.exists) {
@@ -394,8 +477,8 @@ function runGetTimelineExport(cfg, projectName) {
 
 function mergeCsvWithTxt() {
     try {
-        var helperPath = joinPath(joinPath(ROOT_DIR, 'core'), 'premierCore');
-        helperPath = joinPath(helperPath, 'helper.jsx');
+        // Use JSX_DIR from path.txt or fallback
+        var helperPath = joinPath(JSX_DIR, 'helper.jsx');
         helperPath = normalizePath(helperPath);
         file = new File(helperPath);
         if (file.exists) {
@@ -416,8 +499,8 @@ function mergeCsvWithTxt() {
 //chỉ cần chạy eval file imortResource.jsx
 // --- IGNORE ---
 function importMultipleFolders() {
-    var p = joinPath(joinPath(ROOT_DIR, 'core'), 'premierCore');
-    var script = joinPath(p, 'importResource.jsx');
+    // Use JSX_DIR from path.txt or fallback
+    var script = joinPath(JSX_DIR, 'importResource.jsx');
     script = normalizePath(script);
     file = new File(script);
     if (!file.exists) {
@@ -492,8 +575,8 @@ function runAll() {
     $.writeln('[runAll] Imported files: ' + imported);
 
     // 4) Cut & Push: evaluate cutAndPush.jsx (it auto-runs using data/timeline_export_merged.csv)
-    var cpScript = joinPath(joinPath(ROOT_DIR, 'core'), 'premierCore');
-    cpScript = joinPath(cpScript, 'cutAndPush.jsx');
+    // Use JSX_DIR from path.txt or fallback
+    var cpScript = joinPath(JSX_DIR, 'cutAndPush.jsx');
     if (!fileExists(cpScript)) {
         alert('Không tìm thấy cutAndPush.jsx');
         return;

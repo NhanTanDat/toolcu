@@ -236,14 +236,74 @@ function _parsePathTxt(path) {
 	}
 }
 
+function _fileExists(p) {
+	try { var f = new File(p); return f.exists; } catch (e) { return false; }
+}
+
+function _joinPath(a, b) {
+	if (!a || a === '') return b || '';
+	if (!b || b === '') return a || '';
+	var s = a.charAt(a.length - 1);
+	return (s === '/' || s === '\\') ? (a + b) : (a + '/' + b);
+}
+
+// Try to find path.txt in multiple possible locations (for PyInstaller .exe support)
+function _findPathTxt() {
+	var possiblePaths = [];
+
+	// 1. Try from script location (works when running from VSCode)
+	try {
+		var scriptFile = new File($.fileName);
+		var premierCoreDir = scriptFile.parent;
+		var coreDir = premierCoreDir.parent;
+		var rootDir = coreDir.parent;
+		if (rootDir) {
+			possiblePaths.push(_joinPath(rootDir.fsName, 'data/path.txt'));
+		}
+	} catch (e) {}
+
+	// 2. Try common Windows paths where .exe might be installed
+	var commonPaths = [
+		'C:/toolcu/data/path.txt',
+		'D:/toolcu/data/path.txt',
+		Folder.desktop.fsName + '/toolcu/data/path.txt',
+		Folder.myDocuments.fsName + '/toolcu/data/path.txt'
+	];
+
+	for (var i = 0; i < commonPaths.length; i++) {
+		possiblePaths.push(commonPaths[i].replace(/\\/g, '/'));
+	}
+
+	// Try each path
+	for (var j = 0; j < possiblePaths.length; j++) {
+		var p = possiblePaths[j];
+		if (_fileExists(p)) {
+			$.writeln('[importResource] Found path.txt at: ' + p);
+			return p;
+		}
+	}
+
+	return null;
+}
+
 function getResourceFolderFromConfig() {
 	// Check if override from runAll.jsx
 	if (typeof RUNALL_RESOURCE_DIR !== 'undefined' && RUNALL_RESOURCE_DIR) {
 		return RUNALL_RESOURCE_DIR;
 	}
-	// Fallback to reading from path.txt
-	var pathTxt = $.fileName ? new File($.fileName).parent.parent.parent.fsName + '/data/path.txt' : 'data/path.txt';
+	// Try to find path.txt in multiple locations (supports PyInstaller .exe)
+	var pathTxt = _findPathTxt();
+	if (!pathTxt) {
+		notify('Không tìm thấy path.txt');
+		return '';
+	}
 	var cfg = _parsePathTxt(pathTxt);
+	// Try resource_dir from path.txt first (set by Python GUI)
+	if (cfg && cfg.resource_dir) {
+		var rd = cfg.resource_dir.replace(/\\/g, '/');
+		$.writeln('[importResource] Using resource_dir from path.txt: ' + rd);
+		return rd;
+	}
 	if (cfg && cfg.project_path) {
 		//loại bỏ tên file, lấy thư mục cha + /resource
 		var projPath = cfg.project_path.replace(/\\/g, '/');
