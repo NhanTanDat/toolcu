@@ -12,6 +12,7 @@ except ImportError:
 
 from time import sleep
 import os
+import sys
 
 # Try import pyperclip (optional, only needed for clipboard operations)
 try:
@@ -27,6 +28,19 @@ except ImportError:
             pass
 
 
+def get_jsx_path():
+    """Get the path to runAll.jsx based on whether we're running from .exe or source."""
+    if getattr(sys, 'frozen', False):
+        # Running as .exe - JSX files are in the same folder as .exe
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        # Running from source - JSX files are relative to this file
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+    jsx_path = os.path.join(base_dir, 'core', 'premierCore', 'runAll.jsx')
+    return jsx_path.replace('/', '\\')
+
+
 def copy_paste(path):
     '''function that change the download path of YT Downloader'''
     #giả lập thay tác ctrl + c bằng các lưu
@@ -34,84 +48,103 @@ def copy_paste(path):
     send_keys('^v')
 
 
-#hàm này thực hiện mở vscode và chạy file runAll.jsx tự động
+def focus_premiere():
+    """Focus on Premiere Pro window."""
+    for w in Desktop(backend="uia").windows():
+        if "Adobe Premiere Pro" in w.window_text():
+            w.set_focus()
+            return True
+    return False
+
+
+#hàm này thực hiện mở Premiere và chạy file runAll.jsx tự động (KHÔNG CẦN VSCODE)
 def run_premier_script(premier_path, project_path, idx):
-    os.system('taskkill /IM "Adobe Premiere Pro.exe" /F')
+    print("[control.py] Đang khởi động Premiere Pro...")
+    os.system('taskkill /IM "Adobe Premiere Pro.exe" /F 2>nul')
+    sleep(2)
+
     app = None
+    # Kiểm tra xem Premiere đã chạy chưa
     for w in Desktop(backend="uia").windows():
         if "Adobe Premiere Pro" in w.window_text():
             app = Application(backend="uia").connect(title_re=".*Adobe Premiere Pro.*")
             w.set_focus()
             send_keys('^s')
             break
+
     if not app:
-        print("Premiere Pro is not running.")
+        print("[control.py] Premiere Pro chưa chạy, đang khởi động...")
         app = Application(backend="uia").start(
             r'"C:\Program Files\Adobe\Adobe Premiere Pro 2022\Adobe Premiere Pro.exe"',
         )
-    sleep(10)  # Chờ một chút để Premiere Pro khởi động hoàn toàn
+
+    sleep(10)  # Chờ Premiere Pro khởi động
+
+    # Mở project
+    print(f"[control.py] Đang mở project: {project_path}")
     send_keys('^o')
-    sleep(2)  # Chờ một chút để cửa sổ mở project xuất hiện
-    #gõ đường dẫn project
+    sleep(2)
     copy_paste(project_path)
     send_keys('{ENTER}')
-    sleep(5)  # Chờ một chút để project được mởpremierepro
-    send_keys('{ESC}{ESC}{ESC}{ESC}{ESC}{ESC}{ESC}{ESC}{ESC}')
-    sleep(5)
-    send_keys('{ESC}{ESC}{ESC}{ESC}{ESC}{ESC}{ESC}{ESC}{ESC}')
+    sleep(8)  # Chờ project load
+
+    # Đóng các popup
+    for _ in range(5):
+        send_keys('{ESC}')
+        sleep(0.3)
     sleep(2)
-    #tab sang cửa sổ vscode, tab cho đến khi thấy cửa sổ vscode hiện lên
-    for w in Desktop(backend="uia").windows():
-        if "Visual Studio Code" in w.window_text():
-            w.set_focus()
-            break
 
+    # Lấy đường dẫn JSX
+    jsx_path = get_jsx_path()
+    print(f"[control.py] Đường dẫn JSX: {jsx_path}")
 
-    #bấm ctrl+e mở go to file
-    send_keys('^e')
-    send_keys('runAll.jsx')
-    send_keys('{ENTER}')
-
-    send_keys('^+p')
+    # Focus vào Premiere
+    focus_premiere()
     sleep(1)
-    copy_paste('ExtendScript: Evaluate Script in Attached Host')
-    sleep(0.5)
-    send_keys('{ENTER}')  # Nhấn Enter để chọn lệnh
-    sleep(0.5)
-    copy_paste('Adobe Premiere Pro 2022')
-    sleep(0.5)
-    send_keys('{ENTER}')  # Nhấn Enter để chọn lệnh
 
-    #quay lại cửa sổ premier
-    for w in Desktop(backend="uia").windows():
-        if "Adobe Premiere Pro" in w.window_text():
-            w.set_focus()
-            break
+    # Chạy JSX qua menu File > Scripts > Run Script (KHÔNG CẦN VSCODE!)
+    # Premiere Pro: File menu -> Scripts -> Run Script...
+    print("[control.py] Đang chạy JSX script qua Premiere menu...")
 
-    #liên tục spam nút esc để tắt hết các popup
+    # Mở File menu
+    send_keys('%f')  # Alt+F
+    sleep(0.5)
+
+    # Di chuyển đến Scripts (thường là mục thứ mấy trong menu, dùng phím tắt 's')
+    # Hoặc dùng mũi tên xuống nhiều lần
+    for _ in range(15):  # Di chuyển xuống để tìm Scripts
+        send_keys('{DOWN}')
+        sleep(0.1)
+
+    # Nhấn Enter hoặc Right để vào submenu Scripts
+    send_keys('{RIGHT}')
+    sleep(0.3)
+
+    # Chọn "Run Script..." (thường là mục đầu tiên trong submenu)
+    send_keys('{ENTER}')
+    sleep(1)
+
+    # Paste đường dẫn JSX vào dialog
+    copy_paste(jsx_path)
+    sleep(0.5)
+    send_keys('{ENTER}')
+    sleep(2)
+
+    print("[control.py] Đã gửi lệnh chạy script. Đang chờ hoàn thành...")
+
+    # Chờ script chạy xong
     while True:
-        #nếu premier đã bị tắt thì thoát khỏi vòng lặp
         if not app.is_process_running():
-            print("Premiere Pro has been closed.")
+            print("[control.py] Premiere Pro đã đóng.")
             break
         try:
             send_keys('{ENTER}')
             sleep(5)
         except Exception as e:
-            print("No more popups to close.")
-            break
-    print("Script execution completed.")
-
-    #dọn dẹp tài nguyên
-    for w in Desktop(backend="uia").windows():
-        if "Visual Studio Code" in w.window_text():
-            w.set_focus()
+            print("[control.py] Script đã hoàn thành.")
             break
 
-    #đóng session premier
-    if app:
-        app.close()
-        print("Premiere Pro session closed.")
+    print("[control.py] === HOÀN THÀNH ===")
 
 #test
 if __name__ == "__main__":
