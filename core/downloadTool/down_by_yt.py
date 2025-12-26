@@ -16,10 +16,33 @@ Dùng yt-dlp để tải VIDEO/AUDIO.
 import os
 import re
 import shutil
+import sys
 from typing import Dict, List, Optional
 
 # Cookie (nếu cần)
 COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "").strip()
+
+# Auto-detect cookie file in common locations if not set
+if not COOKIES_FILE or not os.path.isfile(COOKIES_FILE):
+    # Get script directory and parent directories
+    script_dir = os.path.abspath(os.path.dirname(__file__))
+    parent_dir = os.path.abspath(os.path.join(script_dir, "..", ".."))
+
+    # Check common locations for youtube_cookies.txt
+    possible_cookie_paths = [
+        "youtube_cookies.txt",  # Current working directory
+        os.path.join(os.getcwd(), "youtube_cookies.txt"),
+        os.path.join(parent_dir, "youtube_cookies.txt"),  # Project root
+        os.path.join(script_dir, "youtube_cookies.txt"),  # Script directory
+        # For .exe file (check in the executable's directory)
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "youtube_cookies.txt"),
+    ]
+
+    for path in possible_cookie_paths:
+        if path and os.path.isfile(path):
+            COOKIES_FILE = os.path.abspath(path)
+            print(f"[down_by_yt] Auto-detected cookie file: {COOKIES_FILE}")
+            break
 
 # Ép client để giảm warning SABR (tuỳ chọn)
 # Use 'web' client instead of 'android' to avoid PO Token requirement

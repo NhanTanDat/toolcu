@@ -32,15 +32,14 @@ YouTube đã bật biện pháp chống bot mạnh hơn, yêu cầu cookies từ
 
 #### Bước 3: Đặt File Cookies
 
-**Copy file vào folder tool:**
-```
-C:\Users\Admin\Desktop\autotool_win64\youtube_cookies.txt
-```
+**Copy file vào folder tool (TỰ ĐỘNG TÌM):**
 
-Hoặc nếu đang chạy Python script:
-```
-D:\your-project-folder\youtube_cookies.txt
-```
+Tool sẽ **TỰ ĐỘNG** tìm file `youtube_cookies.txt` ở các vị trí sau:
+1. ✅ Folder chứa file .exe: `autotool_win64\youtube_cookies.txt`
+2. ✅ Thư mục gốc project: `D:\your-project-folder\youtube_cookies.txt`
+3. ✅ Thư mục hiện tại khi chạy tool
+
+**Không cần set biến môi trường!** Chỉ cần đặt file vào một trong những vị trí trên.
 
 ### Phương Pháp 2: Dùng yt-dlp Built-in (TỰ ĐỘNG)
 
@@ -74,16 +73,15 @@ Tool đã được config để tự động lấy cookies từ Chrome!
 
 ### Option A: Dùng File Cookies (youtube_cookies.txt)
 
-1. **Tạo biến môi trường:**
+**CÁCH DỄ NHẤT - TỰ ĐỘNG TÌM FILE:**
 
-Trong PowerShell:
-```powershell
-$env:YTDLP_COOKIES_FILE = "C:\Users\Admin\Desktop\autotool_win64\youtube_cookies.txt"
-```
+1. **Đặt file `youtube_cookies.txt` vào folder tool:**
+   - Cùng folder với `autotool.exe`
+   - Hoặc thư mục gốc project (nếu chạy Python)
 
-Hoặc thêm vào System Environment Variables (vĩnh viễn).
+2. **Chạy tool** - Tool sẽ tự động tìm và sử dụng file!
 
-2. **Chạy lại tool**
+**KHÔNG CẦN** set biến môi trường nữa!
 
 ### Option B: Dùng Browser Cookies (Tự động)
 
