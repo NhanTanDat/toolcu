@@ -22,7 +22,9 @@ from typing import Dict, List, Optional
 COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "").strip()
 
 # Ép client để giảm warning SABR (tuỳ chọn)
-YTDLP_PLAYER_CLIENT = (os.environ.get("YTDLP_PLAYER_CLIENT", "android") or "android").strip().lower()
+# Use 'web' client instead of 'android' to avoid PO Token requirement
+# YouTube blocked android client in late 2024, requiring PO Token
+YTDLP_PLAYER_CLIENT = (os.environ.get("YTDLP_PLAYER_CLIENT", "web") or "web").strip().lower()
 
 # Retry tuning (tuỳ chọn)
 YTDLP_RETRIES = int(os.environ.get("YTDLP_RETRIES", "10"))
@@ -185,13 +187,17 @@ def _download_group(group_name: str, links: List[str], parent_folder: str, media
             })
             print("[down_by_yt] Dùng profile VIDEO MP4(H.264) + merge bằng ffmpeg cho Premiere.")
         else:
+            # Without ffmpeg, try to download best available MP4 (even if needs merging)
+            # yt-dlp can merge using built-in ffmpeg if available in PATH
             ydl_opts.update({
-                "format": "b[ext=mp4][vcodec^=avc1]",
+                "format": "bv*[ext=mp4][vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc1]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best[ext=mp4]/best",
+                "merge_output_format": "mp4",
                 "final_ext": "mp4",
             })
             print(
-                "[down_by_yt][WARN] ffmpeg KHÔNG có, chỉ tải được progressive MP4 H.264.\n"
-                "  Nếu video không có định dạng này thì sẽ bị SKIP."
+                "[down_by_yt][WARN] ffmpeg KHÔNG được cấu hình rõ ràng.\n"
+                "  → Sẽ thử tải best MP4 (H.264) có sẵn.\n"
+                "  → Nếu cần merge, yt-dlp sẽ tìm ffmpeg trong PATH."
             )
 
     # ✅ KHÔNG FILTER GÌ HẾT: tải đúng thứ tự links (sequential)
