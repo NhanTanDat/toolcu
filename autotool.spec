@@ -4,12 +4,15 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('core', 'core'), ('GUI', 'GUI'), ('data', 'data')]
 binaries = []
-hiddenimports = ['selenium', 'yt_dlp']
+hiddenimports = ['selenium', 'yt_dlp', 'google.generativeai', 'google.ai.generativelanguage']
 hiddenimports += collect_submodules('core')
 hiddenimports += collect_submodules('core.downloadTool')
+hiddenimports += collect_submodules('google.generativeai')
 tmp_ret = collect_all('selenium')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('yt_dlp')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('google.generativeai')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
@@ -38,7 +41,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=True,  # Enable console to see debug logs
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
