@@ -47,21 +47,17 @@ except ImportError:
 _gemini_module = None
 
 def _check_gemini_available():
-    """Check if Gemini API is available at RUNTIME (not import time).
+    """Check if Gemini API key was set by GUI (via os.environ).
 
-    This allows the GUI to set GEMINI_API_KEY before calling get_links functions.
+    GUI sets os.environ['GEMINI_API_KEY'] when user clicks Run.
+    Only uses API key from GUI - no .env file.
     """
     global _gemini_module
 
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except Exception:
-        pass
-
-    api_key = os.getenv('GEMINI_API_KEY', '')
+    # Only check environment variable set by GUI - NO .env file
+    api_key = os.environ.get('GEMINI_API_KEY', '')
     if api_key:
-        print("[get_link] GEMINI API DETECTED - Will use Gemini-powered search")
+        print("[get_link] GEMINI API KEY từ GUI - Sử dụng Gemini search")
         if _gemini_module is None:
             try:
                 from . import get_link_gemini as gm
@@ -74,6 +70,8 @@ def _check_gemini_available():
                     print("[get_link] WARNING: get_link_gemini module not found")
                     return False
         return True
+    else:
+        print("[get_link] Không có Gemini API key - Sử dụng Selenium mode")
     return False
 
 

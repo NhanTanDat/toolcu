@@ -334,20 +334,11 @@ class AutoToolGUI(tk.Tk):
         gemini_key = self.gemini_api_key_var.get().strip()
         if gemini_key:
             os.environ['GEMINI_API_KEY'] = gemini_key
-            self.log("✓ Đã cấu hình Gemini API key từ GUI")
+            self.log("✓ Sử dụng Gemini API key từ GUI → Gemini mode")
         else:
-            # Check if API key exists in .env
-            try:
-                from dotenv import load_dotenv
-                load_dotenv()
-                env_key = os.getenv('GEMINI_API_KEY', '')
-                if env_key:
-                    self.log("✓ Sử dụng Gemini API key từ file .env")
-                else:
-                    self.log("⚠️ CẢNH BÁO: Không tìm thấy Gemini API key (GUI hoặc .env)")
-                    self.log("   → Sẽ dùng Selenium mode (chậm hơn)")
-            except Exception:
-                pass
+            # Clear any existing key to ensure Selenium mode
+            os.environ.pop('GEMINI_API_KEY', None)
+            self.log("⚠️ Không có Gemini API key → Selenium mode (chậm hơn)")
 
         # Create resource directory if it doesn't exist
         if not os.path.isdir(parent):
