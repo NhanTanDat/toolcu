@@ -267,6 +267,20 @@ function getRootDirFromScript() {
 function findPathTxt() {
     var possiblePaths = [];
 
+    // 0. PRIORITY: Try LOCALAPPDATA/APPDATA first (where control.py writes path.txt)
+    try {
+        var localAppData = $.getenv('LOCALAPPDATA');
+        var appData = $.getenv('APPDATA');
+        if (localAppData && localAppData !== '') {
+            possiblePaths.push(normalizePath(localAppData + '/autotool/data/path.txt'));
+        }
+        if (appData && appData !== '') {
+            possiblePaths.push(normalizePath(appData + '/autotool/data/path.txt'));
+        }
+    } catch (e) {
+        log('Error getting env vars: ' + e);
+    }
+
     // 1. Try from script location (works when running from VSCode)
     var scriptDir = getThisDir();
     var rootFromScript = null;

@@ -64,6 +64,20 @@ function _parsePathTxt(path) {
 function _findPathTxt() {
 	var possiblePaths = [];
 
+	// 0. PRIORITY: Try LOCALAPPDATA/APPDATA first (where control.py writes path.txt)
+	try {
+		var localAppData = $.getenv('LOCALAPPDATA');
+		var appData = $.getenv('APPDATA');
+		if (localAppData && localAppData !== '') {
+			possiblePaths.push((localAppData + '/autotool/data/path.txt').replace(/\\/g, '/'));
+		}
+		if (appData && appData !== '') {
+			possiblePaths.push((appData + '/autotool/data/path.txt').replace(/\\/g, '/'));
+		}
+	} catch (e) {
+		$.writeln('[_findPathTxt] Error getting env vars: ' + e);
+	}
+
 	// 1. Try from script location (works when running from VSCode)
 	try {
 		var scriptFile = new File($.fileName);
