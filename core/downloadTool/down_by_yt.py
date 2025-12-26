@@ -163,8 +163,14 @@ def _download_group(group_name: str, links: List[str], parent_folder: str, media
         "sleep_interval": YTDLP_SLEEP_INTERVAL,
         "max_sleep_interval": YTDLP_MAX_SLEEP_INTERVAL,
 
-        # giảm warning SABR
-        "extractor_args": {"youtube": {"player_client": [YTDLP_PLAYER_CLIENT]}},
+        # YouTube player client - try multiple for better compatibility
+        # ios works best, then android_creator, then web as fallback
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["ios", "android_creator", YTDLP_PLAYER_CLIENT],
+                "player_skip": ["configs", "webpage"],  # Skip some checks
+            }
+        },
 
         # ✅ không subtitles
         "writesubtitles": False,

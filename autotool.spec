@@ -15,10 +15,23 @@ hiddenimports = [
     'google.ai.generativelanguage',
     'dotenv',
     'pyperclip',  # Optional but included
+    # yt-dlp signature extraction dependencies
+    'brotli',
+    'Crypto',
+    'Crypto.Cipher',
+    'cryptography',
+    'websockets',
+    'mutagen',
+    'certifi',
+    'urllib3',
 ]
 hiddenimports += collect_submodules('core')
 hiddenimports += collect_submodules('core.downloadTool')
 hiddenimports += collect_submodules('google.generativeai')
+hiddenimports += collect_submodules('yt_dlp.extractor')
+hiddenimports += collect_submodules('brotli')
+hiddenimports += collect_submodules('cryptography')
+hiddenimports += collect_submodules('websockets')
 
 # Collect all for selenium and yt_dlp
 tmp_ret = collect_all('selenium')
