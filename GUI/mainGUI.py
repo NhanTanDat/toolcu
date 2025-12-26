@@ -58,6 +58,11 @@ class AutoToolGUI(tk.Tk):
         self.batch_projects: list[str] = []
         self.premier_projects: list[str] = []
 
+        # API Keys
+        self.google_api_key_var = tk.StringVar(value="")
+        self.youtube_api_key_var = tk.StringVar(value="")
+        self.gemini_api_key_var = tk.StringVar(value="")
+
         # Prevent saving while loading initial config
         self._loading_config = True
 
@@ -223,6 +228,84 @@ class AutoToolGUI(tk.Tk):
         self.log_text2.configure(yscrollcommand=scroll2.set)
         frm2.columnconfigure(1, weight=1)
         frm2.rowconfigure(row2, weight=1)
+
+        # Tab 3: Cài đặt (Settings)
+        tab3 = ttk.Frame(notebook, padding=10)
+        notebook.add(tab3, text="Cài đặt")
+
+        main_frame3 = ttk.Frame(tab3, padding=10)
+        main_frame3.pack(fill="both", expand=True)
+
+        frm3 = ttk.Frame(main_frame3, padding=10, relief="groove")
+        frm3.pack(fill="both", expand=True)
+        row3 = 0
+
+        # API Keys section
+        ttk.Label(frm3, text="API Keys:", font=("Segoe UI", 12, "bold")).grid(row=row3, column=0, sticky="w", padx=pad, pady=(pad, 8))
+        row3 += 1
+
+        ttk.Label(frm3, text="Lưu ý: API keys được lưu trong file config.json (đã được .gitignore)", foreground="#666").grid(row=row3, column=0, columnspan=2, sticky="w", padx=pad, pady=(0, 12))
+        row3 += 1
+
+        # Google API Key
+        ttk.Label(frm3, text="Google API Key:").grid(row=row3, column=0, sticky="w", padx=pad, pady=4)
+        row3 += 1
+        self.google_api_entry = ttk.Entry(frm3, textvariable=self.google_api_key_var, width=60, show="*")
+        self.google_api_entry.grid(row=row3, column=0, columnspan=2, sticky="w", padx=pad, pady=(0, 8))
+        row3 += 1
+
+        # YouTube API Key
+        ttk.Label(frm3, text="YouTube API Key:").grid(row=row3, column=0, sticky="w", padx=pad, pady=4)
+        row3 += 1
+        self.youtube_api_entry = ttk.Entry(frm3, textvariable=self.youtube_api_key_var, width=60, show="*")
+        self.youtube_api_entry.grid(row=row3, column=0, columnspan=2, sticky="w", padx=pad, pady=(0, 8))
+        row3 += 1
+
+        # Gemini API Key
+        ttk.Label(frm3, text="Gemini API Key:").grid(row=row3, column=0, sticky="w", padx=pad, pady=4)
+        row3 += 1
+        self.gemini_api_entry = ttk.Entry(frm3, textvariable=self.gemini_api_key_var, width=60, show="*")
+        self.gemini_api_entry.grid(row=row3, column=0, columnspan=2, sticky="w", padx=pad, pady=(0, 8))
+        row3 += 1
+
+        # Show/Hide API Keys button
+        self.show_api_keys_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frm3, text="Hiển thị API Keys", variable=self.show_api_keys_var, command=self._toggle_api_key_visibility).grid(row=row3, column=0, sticky="w", padx=pad, pady=(8, 4))
+        row3 += 1
+
+        # Buttons
+        btn_frame3 = ttk.Frame(frm3)
+        btn_frame3.grid(row=row3, column=0, columnspan=2, sticky="w", padx=pad, pady=(16, 4))
+        ttk.Button(btn_frame3, text="Lưu cài đặt", style="Custom.TButton", command=self._save_settings).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_frame3, text="Xoá tất cả API Keys", command=self._clear_api_keys).pack(side="left", padx=6)
+        row3 += 1
+
+        frm3.columnconfigure(0, weight=1)
+
+    # ------------------------------------------------------------------
+    # Settings tab methods
+    # ------------------------------------------------------------------
+    def _toggle_api_key_visibility(self):
+        show = self.show_api_keys_var.get()
+        char = "" if show else "*"
+        self.google_api_entry.configure(show=char)
+        self.youtube_api_entry.configure(show=char)
+        self.gemini_api_entry.configure(show=char)
+
+    def _save_settings(self):
+        try:
+            self._save_config()
+            messagebox.showinfo("Thành công", "Đã lưu cài đặt thành công!")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể lưu cài đặt: {e}")
+
+    def _clear_api_keys(self):
+        if messagebox.askyesno("Xác nhận", "Bạn có chắc muốn xoá tất cả API Keys?"):
+            self.google_api_key_var.set("")
+            self.youtube_api_key_var.set("")
+            self.gemini_api_key_var.set("")
+            self._save_config()
+            messagebox.showinfo("Thành công", "Đã xoá tất cả API Keys!")
 
     # ------------------------------------------------------------------
     # Utility methods
@@ -771,6 +854,10 @@ class AutoToolGUI(tk.Tk):
                 'regen_links': bool(self.regen_links_var.get()),
                 'batch_projects': list(self.batch_projects) if isinstance(self.batch_projects, list) else [],
                 'premier_projects': list(self.premier_projects) if isinstance(self.premier_projects, list) else [],
+                # API Keys
+                'google_api_key': self.google_api_key_var.get().strip(),
+                'youtube_api_key': self.youtube_api_key_var.get().strip(),
+                'gemini_api_key': self.gemini_api_key_var.get().strip(),
             }
             os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
             with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
@@ -817,6 +904,13 @@ class AutoToolGUI(tk.Tk):
                 self.batch_projects = [str(x) for x in cfg['batch_projects']]
             if 'premier_projects' in cfg and isinstance(cfg['premier_projects'], list):
                 self.premier_projects = [str(x) for x in cfg['premier_projects']]
+            # API Keys
+            if 'google_api_key' in cfg:
+                self.google_api_key_var.set(str(cfg['google_api_key']))
+            if 'youtube_api_key' in cfg:
+                self.youtube_api_key_var.set(str(cfg['youtube_api_key']))
+            if 'gemini_api_key' in cfg:
+                self.gemini_api_key_var.set(str(cfg['gemini_api_key']))
         except Exception as e:
             try:
                 self.log(f"CẢNH BÁO: Không áp dụng được config: {e}")
@@ -859,6 +953,10 @@ class AutoToolGUI(tk.Tk):
             self.max_duration_var,
             self.min_duration_var,
             self.regen_links_var,
+            # API Keys
+            self.google_api_key_var,
+            self.youtube_api_key_var,
+            self.gemini_api_key_var,
         ]
         for v in vars_to_bind:
             try:
