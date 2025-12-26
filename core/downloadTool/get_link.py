@@ -43,21 +43,38 @@ except ImportError:
         """Dummy send_keys when pywinauto not installed."""
         pass
 
-# Check if Gemini API is available
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-    _GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
-    _USE_GEMINI = bool(_GEMINI_API_KEY)
-    if _USE_GEMINI:
+# Gemini module (lazy import)
+_gemini_module = None
+
+def _check_gemini_available():
+    """Check if Gemini API is available at RUNTIME (not import time).
+
+    This allows the GUI to set GEMINI_API_KEY before calling get_links functions.
+    """
+    global _gemini_module
+
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
+
+    api_key = os.getenv('GEMINI_API_KEY', '')
+    if api_key:
         print("[get_link] GEMINI API DETECTED - Will use Gemini-powered search")
-        try:
-            from . import get_link_gemini
-        except ImportError:
-            import get_link_gemini
-except Exception as e:
-    _USE_GEMINI = False
-    print(f"[get_link] Gemini API not available, using Selenium mode: {e}")
+        if _gemini_module is None:
+            try:
+                from . import get_link_gemini as gm
+                _gemini_module = gm
+            except ImportError:
+                try:
+                    import get_link_gemini as gm
+                    _gemini_module = gm
+                except ImportError:
+                    print("[get_link] WARNING: get_link_gemini module not found")
+                    return False
+        return True
+    return False
 
 
 def init_driver(headless: bool = False):
@@ -421,10 +438,10 @@ def get_links_main_video(
     <link 2>
     ...
     """
-    # GEMINI MODE: Redirect to Gemini-powered search
-    if _USE_GEMINI:
+    # GEMINI MODE: Redirect to Gemini-powered search (check at runtime!)
+    if _check_gemini_available() and _gemini_module:
         print("[get_link] Using GEMINI API mode for video search")
-        return get_link_gemini.get_links_main_video(
+        return _gemini_module.get_links_main_video(
             keywords_file=keywords_file,
             output_txt=output_txt,
             project_name=project_name,
@@ -505,10 +522,10 @@ def get_links_main_image(
     <link ảnh 2>
     ...
     """
-    # GEMINI MODE: Redirect to Gemini-powered search
-    if _USE_GEMINI:
+    # GEMINI MODE: Redirect to Gemini-powered search (check at runtime!)
+    if _check_gemini_available() and _gemini_module:
         print("[get_link] Using GEMINI API mode for image search")
-        return get_link_gemini.get_links_main_image(
+        return _gemini_module.get_links_main_image(
             keywords_file=keywords_file,
             output_txt=output_txt,
             project_name=project_name,
