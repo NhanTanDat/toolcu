@@ -19,35 +19,16 @@ import shutil
 import sys
 from typing import Dict, List, Optional
 
-# Cookie (nếu cần)
-COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "").strip()
+# NOTE: We use iOS client which does NOT require cookies
+# Cookies are commented out because:
+# - iOS client works WITHOUT cookies
+# - Web client + cookies now requires PO Token + Data Sync ID (complex)
+# - iOS client is simpler and more reliable for bypassing YouTube bot detection
 
-# Auto-detect cookie file in common locations if not set
-if not COOKIES_FILE or not os.path.isfile(COOKIES_FILE):
-    # Get script directory and parent directories
-    script_dir = os.path.abspath(os.path.dirname(__file__))
-    parent_dir = os.path.abspath(os.path.join(script_dir, "..", ".."))
+# COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "").strip()
 
-    # Check common locations for youtube_cookies.txt
-    possible_cookie_paths = [
-        "youtube_cookies.txt",  # Current working directory
-        os.path.join(os.getcwd(), "youtube_cookies.txt"),
-        os.path.join(parent_dir, "youtube_cookies.txt"),  # Project root
-        os.path.join(script_dir, "youtube_cookies.txt"),  # Script directory
-        # For .exe file (check in the executable's directory)
-        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "youtube_cookies.txt"),
-    ]
-
-    for path in possible_cookie_paths:
-        if path and os.path.isfile(path):
-            COOKIES_FILE = os.path.abspath(path)
-            print(f"[down_by_yt] Auto-detected cookie file: {COOKIES_FILE}")
-            break
-
-# Ép client để giảm warning SABR (tuỳ chọn)
-# Use 'web' client instead of 'android' to avoid PO Token requirement
-# YouTube blocked android client in late 2024, requiring PO Token
-YTDLP_PLAYER_CLIENT = (os.environ.get("YTDLP_PLAYER_CLIENT", "web") or "web").strip().lower()
+# Player client is now hardcoded to "ios" in extractor_args
+# YTDLP_PLAYER_CLIENT = (os.environ.get("YTDLP_PLAYER_CLIENT", "ios") or "ios").strip().lower()
 
 # Retry tuning (tuỳ chọn)
 YTDLP_RETRIES = int(os.environ.get("YTDLP_RETRIES", "10"))
@@ -163,12 +144,11 @@ def _download_group(group_name: str, links: List[str], parent_folder: str, media
         "sleep_interval": YTDLP_SLEEP_INTERVAL,
         "max_sleep_interval": YTDLP_MAX_SLEEP_INTERVAL,
 
-        # YouTube player client - try multiple for better compatibility
-        # ios works best, then android_creator, then web as fallback
+        # Use iOS client (works WITHOUT cookies, no PO Token needed)
+        # This bypasses YouTube's 2025 bot detection without needing cookies/Data Sync ID
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "android_creator", YTDLP_PLAYER_CLIENT],
-                "player_skip": ["configs", "webpage"],  # Skip some checks
+                "player_client": ["ios"],
             }
         },
 
@@ -177,33 +157,10 @@ def _download_group(group_name: str, links: List[str], parent_folder: str, media
         "writeautomaticsub": False,
     }
 
-    # Cookies support to bypass YouTube bot detection
-    if COOKIES_FILE and os.path.isfile(COOKIES_FILE):
-        ydl_opts["cookiefile"] = COOKIES_FILE
-        print(f"[down_by_yt] Using cookies from file: {COOKIES_FILE}")
-    else:
-        # Fallback: Auto-use browser cookies (bypass bot detection)
-        # NOTE: Browser must be CLOSED for cookie extraction to work!
-        print("[down_by_yt] Auto-detecting browser cookies...")
-        print("  → IMPORTANT: Close ALL browser windows for this to work!")
-
-        # Try Firefox first (less likely to be locked), then Chrome
-        browsers_to_try = [("firefox",), ("chrome",)]
-        cookies_loaded = False
-
-        for browser in browsers_to_try:
-            try:
-                ydl_opts["cookiesfrombrowser"] = browser
-                print(f"[down_by_yt] Trying cookies from {browser[0]}...")
-                cookies_loaded = True
-                break
-            except Exception:
-                continue
-
-        if not cookies_loaded:
-            print("[down_by_yt] WARN: Could not load browser cookies!")
-            print("  → FIX 1 (EASIEST): Close all Chrome/Firefox windows and retry")
-            print("  → FIX 2: Export cookies to file (see FIX_YOUTUBE_BOT_DETECTION.md)")
+    # Note: iOS client works WITHOUT cookies, so we don't need to load them
+    # Cookies + web client requires PO Token which needs Data Sync ID (complex)
+    # iOS client is simpler and more reliable
+    print("[down_by_yt] Using iOS client (no cookies needed)")
 
     if HAS_FFMPEG:
         # ffmpeg_location nên là folder chứa ffmpeg.exe
