@@ -43,7 +43,7 @@ class AutoToolGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("AutoTool - Tự động hoá Premiere")
-        self.geometry("900x650")
+        self.geometry("900x720")
         self.resizable(False, False)
 
         self.version_var = tk.StringVar(value="2022")
@@ -54,6 +54,7 @@ class AutoToolGUI(tk.Tk):
         self.images_per_keyword_var = tk.StringVar(value="10")
         self.max_duration_var = tk.StringVar(value="20")  # mặc định tối đa 20 phút
         self.min_duration_var = tk.StringVar(value="4")   # mặc định tối thiểu 4 phút
+        self.gemini_api_key_var = tk.StringVar(value="")  # Gemini API key
         # Batch projects list
         self.batch_projects: list[str] = []
         self.premier_projects: list[str] = []
@@ -158,6 +159,25 @@ class AutoToolGUI(tk.Tk):
         row += 1
         ttk.Label(frm, text="Chế độ chạy:").grid(row=row, column=0, sticky="w", padx=pad, pady=2)
         ttk.Combobox(frm, textvariable=self.mode_var, values=["both", "video", "image"], width=12, state="readonly").grid(row=row, column=1, sticky="w", padx=pad, pady=2)
+        row += 1
+        # Gemini API Key input
+        ttk.Label(frm, text="Gemini API Key:", font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", padx=pad, pady=(8, 2))
+        row += 1
+        api_key_entry = ttk.Entry(frm, textvariable=self.gemini_api_key_var, width=50, show="*")
+        api_key_entry.grid(row=row, column=0, columnspan=2, sticky="ew", padx=pad, pady=2)
+        # Show/hide button for API key
+        def toggle_api_visibility():
+            if api_key_entry.cget('show') == '*':
+                api_key_entry.config(show='')
+                toggle_btn.config(text='🔒 Ẩn')
+            else:
+                api_key_entry.config(show='*')
+                toggle_btn.config(text='👁️ Hiện')
+        toggle_btn = ttk.Button(frm, text="👁️ Hiện", command=toggle_api_visibility, width=8)
+        toggle_btn.grid(row=row, column=2, sticky="w", padx=(0, pad), pady=2)
+        row += 1
+        ttk.Label(frm, text="💡 Lấy API key miễn phí tại: https://makersuite.google.com/app/apikey",
+                  font=("Segoe UI", 8), foreground="gray").grid(row=row, column=0, columnspan=3, sticky="w", padx=pad, pady=(0, 4))
         row += 1
         # Regen links checkbox
         ttk.Checkbutton(frm, text='Ép tạo lại link lần chạy sau', variable=self.regen_links_var).grid(row=row, column=0, sticky='w', padx=pad, pady=(2,0))
@@ -285,9 +305,28 @@ class AutoToolGUI(tk.Tk):
         version = self.version_var.get().strip()
         dtype = self.download_type_var.get()
         mode = self.mode_var.get().strip()
-        
+
         self.log("=== BẮT ĐẦU TỰ ĐỘNG ===")
-        
+
+        # Set Gemini API key from GUI to environment variable
+        gemini_key = self.gemini_api_key_var.get().strip()
+        if gemini_key:
+            os.environ['GEMINI_API_KEY'] = gemini_key
+            self.log("✓ Đã cấu hình Gemini API key từ GUI")
+        else:
+            # Check if API key exists in .env
+            try:
+                from dotenv import load_dotenv
+                load_dotenv()
+                env_key = os.getenv('GEMINI_API_KEY', '')
+                if env_key:
+                    self.log("✓ Sử dụng Gemini API key từ file .env")
+                else:
+                    self.log("⚠️ CẢNH BÁO: Không tìm thấy Gemini API key (GUI hoặc .env)")
+                    self.log("   → Sẽ dùng Selenium mode (chậm hơn)")
+            except Exception:
+                pass
+
         # Create resource directory if it doesn't exist
         if not os.path.isdir(parent):
             try:
@@ -768,6 +807,7 @@ class AutoToolGUI(tk.Tk):
                 'images_per_keyword': self.images_per_keyword_var.get().strip(),
                 'max_duration': self.max_duration_var.get().strip(),
                 'min_duration': self.min_duration_var.get().strip(),
+                'gemini_api_key': self.gemini_api_key_var.get().strip(),
                 'regen_links': bool(self.regen_links_var.get()),
                 'batch_projects': list(self.batch_projects) if isinstance(self.batch_projects, list) else [],
                 'premier_projects': list(self.premier_projects) if isinstance(self.premier_projects, list) else [],
@@ -808,6 +848,8 @@ class AutoToolGUI(tk.Tk):
                 self.max_duration_var.set(str(cfg['max_duration']))
             if 'min_duration' in cfg:
                 self.min_duration_var.set(str(cfg['min_duration']))
+            if 'gemini_api_key' in cfg:
+                self.gemini_api_key_var.set(str(cfg['gemini_api_key']))
             if 'regen_links' in cfg:
                 try:
                     self.regen_links_var.set(bool(cfg['regen_links']))
@@ -858,6 +900,7 @@ class AutoToolGUI(tk.Tk):
             self.images_per_keyword_var,
             self.max_duration_var,
             self.min_duration_var,
+            self.gemini_api_key_var,
             self.regen_links_var,
         ]
         for v in vars_to_bind:
