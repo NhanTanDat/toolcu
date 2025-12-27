@@ -6,7 +6,7 @@ import sys
 import subprocess
 from time import sleep
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 # =========================
 # OPTIONAL IMPORTS
@@ -118,6 +118,22 @@ def project_root_from_source() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def to_jsx_path(p: Path | str) -> str:
+    # Premiere/ExtendScript chạy ổn nhất với forward slash
+    return str(p).replace("\\", "/")
+
+
+def _is_writable_dir(p: Path) -> bool:
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        t = p / "__write_test__.tmp"
+        t.write_text("ok", encoding="utf-8")
+        t.unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
+
+
 # =========================
 # RESOLVE PREMIERE
 # =========================
@@ -141,21 +157,21 @@ def resolve_premiere_exe(premier_path: Optional[str]) -> str:
 
 
 # =========================
-# RESOLVE JSX PATH (runAll.jsx)
+# RESOLVE PREMIERCORE DIR (.jsx location)
 # =========================
 def resolve_premiercore_dir() -> Path:
     _print_header("RESOLVE premierCore DIR")
     candidates: List[Path] = []
 
     if _is_frozen():
-        # khi chạy exe: ưu tiên _internal
-        candidates.append(exe_dir() / "core" / "premierCore")
+        # ✅ ưu tiên _internal trước (PyInstaller onedir)
         candidates.append(internal_dir_if_any() / "core" / "premierCore")
+        candidates.append(exe_dir() / "core" / "premierCore")
         mp = bundled_meipass_if_any()
         if mp:
             candidates.append(mp / "core" / "premierCore")
 
-    # khi chạy source:
+    # source
     candidates.append(project_root_from_source() / "core" / "premierCore")
 
     print("\n[premierCore] Candidates:")
@@ -189,32 +205,104 @@ def resolve_jsx_path(name: str = "runAll.jsx") -> str:
 
 
 # =========================
-# RESOLVE DATA ROOT + path.txt
+# RESOLVE DATA DIR (where path.txt should live)
 # =========================
-def resolve_data_root() -> Path:
-    _print_header("RESOLVE DATA ROOT")
+def resolve_data_dir() -> Path:
+    """
+    ✅ Quan trọng:
+    - Với onedir build: muốn runAll.jsx tìm được path.txt thì nên đặt ở:
+      dist/autotool/data/path.txt  (KHÔNG phải AppData)
+    - Nếu thư mục đó không writable thì fallback sang AppData.
+    """
+    _print_header("RESOLVE DATA DIR")
+
+    candidates: List[Path] = []
+
+    if _is_frozen():
+        candidates.append(exe_dir() / "data")  # dist/autotool/data
+
     la = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
-    preferred = Path(la) / APP_NAME / "data"
-    preferred.mkdir(parents=True, exist_ok=True)
-    print("=> CHOSEN (writable):", preferred.resolve())
-    return preferred.resolve()
+    candidates.append(Path(la) / APP_NAME / "data")
+
+    for c in candidates:
+        print("  - candidate:", c)
+        if _is_writable_dir(c):
+            print("=> CHOSEN data_dir:", c.resolve())
+            return c.resolve()
+
+    # last resort
+    fallback = (Path.cwd() / "data").resolve()
+    fallback.mkdir(parents=True, exist_ok=True)
+    print("=> CHOSEN data_dir (fallback):", fallback)
+    return fallback
 
 
 def resolve_path_txt() -> Path:
-    path_txt = (resolve_data_root() / "path.txt").resolve()
+    path_txt = (resolve_data_dir() / "path.txt").resolve()
     print("[path.txt] =", path_txt)
     return path_txt
 
 
-def update_path_txt_for_data_folder(data_folder_abs: str) -> None:
-    _print_header("UPDATE path.txt")
+def write_path_txt(cfg: Dict[str, str]) -> Path:
+    _print_header("WRITE path.txt")
     path_txt = resolve_path_txt()
-    content = f"data_folder={data_folder_abs}\n"
-    print("Write content:", content.strip())
-    with open(path_txt, "w", encoding="utf-8") as f:
-        f.write(content)
-    print("=> WROTE:", path_txt, "size=", path_txt.stat().st_size)
 
+    # serialize key=value
+    lines = []
+    for k, v in cfg.items():
+        lines.append(f"{k}={v}")
+    content = "\n".join(lines) + "\n"
+
+    print("Write to:", path_txt)
+    print("Content:\n" + content.strip())
+
+    path_txt.parent.mkdir(parents=True, exist_ok=True)
+    path_txt.write_text(content, encoding="utf-8")
+    print("=> WROTE:", path_txt, "size=", path_txt.stat().st_size)
+    return path_txt
+
+
+def update_path_txt_for_project(project_abs: str) -> Path:
+    """
+    Ghi đủ key để runAll.jsx chạy đúng trong build onedir:
+      - root_dir: APP_ROOT (KHÔNG _internal)
+      - data_dir: APP_ROOT/data
+      - jsx_dir : APP_ROOT/_internal/core/premierCore
+      - project_path, project_slug, data_folder, resource_dir
+    """
+    _print_header("UPDATE path.txt (FULL CFG)")
+
+    project_p = Path(project_abs).resolve()
+    project_slug = project_p.stem
+    project_dir = project_p.parent
+    resource_dir = project_dir / "resource"
+
+    # ✅ APP_ROOT = thư mục chứa exe (dist/autotool) khi frozen
+    app_root = exe_dir() if _is_frozen() else project_root_from_source()
+
+    # ✅ jsx_dir ưu tiên trong _internal
+    internal_root = internal_dir_if_any()
+    jsx_dir = (internal_root / "core" / "premierCore") if internal_root.exists() else (app_root / "core" / "premierCore")
+
+    # ✅ data_dir luôn nằm cạnh exe: APP_ROOT/data
+    data_dir = (app_root / "data")
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # ✅ data_folder = data_dir/<project_slug>
+    data_folder = (data_dir / project_slug)
+    data_folder.mkdir(parents=True, exist_ok=True)
+
+    cfg: Dict[str, str] = {
+        "root_dir": to_jsx_path(app_root),        # ✅ không có _internal
+        "data_dir": to_jsx_path(data_dir),
+        "jsx_dir": to_jsx_path(jsx_dir),
+        "project_path": to_jsx_path(project_p),
+        "project_slug": project_slug,
+        "data_folder": to_jsx_path(data_folder),
+        "resource_dir": to_jsx_path(resource_dir),
+    }
+
+    return write_path_txt(cfg)
 
 # =========================
 # CLIPBOARD / INPUT
@@ -234,7 +322,6 @@ def paste_text(text: str) -> None:
     if ok:
         send_keys("^v")
     else:
-        # fallback gõ từng ký tự
         for ch in text:
             if ch == " ":
                 send_keys("{SPACE}")
@@ -274,48 +361,7 @@ def connect_or_start_premiere(premiere_exe: str):
 # =========================
 # RESOLVE VS CODE
 # =========================
-def resolve_vscode_exe() -> str:
-    _print_header("RESOLVE VS CODE EXE")
-
-    candidates: List[Path] = []
-
-    la = os.environ.get("LOCALAPPDATA")
-    if la:
-        candidates.append(Path(la) / "Programs" / "Microsoft VS Code" / "Code.exe")
-        candidates.append(Path(la) / "Programs" / "Microsoft VS Code Insiders" / "Code - Insiders.exe")
-
-    pf = os.environ.get("PROGRAMFILES")
-    if pf:
-        candidates.append(Path(pf) / "Microsoft VS Code" / "Code.exe")
-
-    pfx86 = os.environ.get("PROGRAMFILES(X86)")
-    if pfx86:
-        candidates.append(Path(pfx86) / "Microsoft VS Code" / "Code.exe")
-
-    # fallback: người dùng add vào PATH (code.cmd)
-    print("[VSCode] Candidates:")
-    for p in candidates:
-        print("  -", p, "=>", "EXISTS" if p.exists() else "MISSING")
-
-    for p in candidates:
-        if p.exists():
-            print("=> CHOSEN:", p.resolve())
-            return str(p.resolve())
-
-    # thử PATH
-    for name in ["code.cmd", "code.exe", "code"]:
-        if shutil_which(name):
-            print("=> CHOSEN (PATH):", name)
-            return name
-
-    raise FileNotFoundError(
-        "Không tìm thấy VS Code.\n"
-        "=> Cần cài Visual Studio Code + ExtendScript Debugger extension."
-    )
-
-
 def shutil_which(cmd: str) -> Optional[str]:
-    # tránh import shutil (để hạn chế), implement nhanh
     exts = os.environ.get("PATHEXT", "").split(";")
     paths = os.environ.get("PATH", "").split(";")
     for d in paths:
@@ -335,6 +381,44 @@ def shutil_which(cmd: str) -> Optional[str]:
     return None
 
 
+def resolve_vscode_exe() -> str:
+    _print_header("RESOLVE VS CODE EXE")
+
+    candidates: List[Path] = []
+
+    la = os.environ.get("LOCALAPPDATA")
+    if la:
+        candidates.append(Path(la) / "Programs" / "Microsoft VS Code" / "Code.exe")
+        candidates.append(Path(la) / "Programs" / "Microsoft VS Code Insiders" / "Code - Insiders.exe")
+
+    pf = os.environ.get("PROGRAMFILES")
+    if pf:
+        candidates.append(Path(pf) / "Microsoft VS Code" / "Code.exe")
+
+    pfx86 = os.environ.get("PROGRAMFILES(X86)")
+    if pfx86:
+        candidates.append(Path(pfx86) / "Microsoft VS Code" / "Code.exe")
+
+    print("[VSCode] Candidates:")
+    for p in candidates:
+        print("  -", p, "=>", "EXISTS" if p.exists() else "MISSING")
+
+    for p in candidates:
+        if p.exists():
+            print("=> CHOSEN:", p.resolve())
+            return str(p.resolve())
+
+    for name in ["code.cmd", "code.exe", "code"]:
+        if shutil_which(name):
+            print("=> CHOSEN (PATH):", name)
+            return name
+
+    raise FileNotFoundError(
+        "Không tìm thấy VS Code.\n"
+        "=> Cần cài Visual Studio Code + ExtendScript Debugger extension."
+    )
+
+
 # =========================
 # RUN JSX VIA VS CODE (EXTENDSCRIPT DEBUGGER)
 # =========================
@@ -343,18 +427,14 @@ def open_vscode_to_file(vscode_exe: str, file_path: str) -> None:
     print("VSCode exe:", vscode_exe)
     print("Open file :", file_path)
 
-    # mở VSCode (reuse-window) và mở file luôn
     try:
         subprocess.Popen([vscode_exe, "--reuse-window", file_path], shell=False)
     except Exception:
-        # fallback string command
         subprocess.Popen(f'"{vscode_exe}" --reuse-window "{file_path}"', shell=True)
 
     sleep(VSCODE_START_WAIT_SEC)
 
-    # focus VS Code
     if not focus_window_contains(VSCODE_WINDOW_KEYWORD):
-        # đôi khi title không chứa đúng keyword, thử focus nhiều lần
         for _ in range(10):
             sleep(0.5)
             if focus_window_contains(VSCODE_WINDOW_KEYWORD):
@@ -362,19 +442,10 @@ def open_vscode_to_file(vscode_exe: str, file_path: str) -> None:
 
 
 def vscode_run_extendscript_evaluate(host_name: str = "Adobe Premiere Pro 2022") -> None:
-    """
-    VS Code:
-      Ctrl+Shift+P
-      gõ: ExtendScript: Evaluate Script in Attached Host
-      Enter
-      chọn host: Adobe Premiere Pro 2022
-      Enter
-    """
     _print_header("VS CODE: EVALUATE EXTENDSCRIPT")
     if not focus_window_contains(VSCODE_WINDOW_KEYWORD):
         print("[warn] Không focus được VS Code, vẫn thử send_keys...")
 
-    # Command Palette
     send_keys("^+p")
     sleep(0.8)
 
@@ -400,7 +471,6 @@ def run_premier_script(premier_path: Optional[str], project_path: str, idx: int)
 
     dump_runtime_info()
 
-    # nếu chạy exe, set cwd về exe_dir để relative path không bị lệch
     if _is_frozen():
         try:
             os.chdir(str(exe_dir()))
@@ -419,26 +489,23 @@ def run_premier_script(premier_path: Optional[str], project_path: str, idx: int)
     if not os.path.exists(project_abs):
         raise FileNotFoundError("Project .prproj không tồn tại (đang sai path hoặc dính quotes).")
 
-    data_folder_abs = str(Path(project_abs).parent.resolve())
-    update_path_txt_for_data_folder(data_folder_abs)
+    # ✅ ghi path.txt chuẩn (có jsx_dir trỏ vào _internal)
+    path_txt = update_path_txt_for_project(project_abs)
+    print("=> path.txt ready:", path_txt)
 
     _print_header("START PREMIERE AUTOMATION")
     print("Premiere exe:", premiere_exe)
     print("JSX path    :", jsx_path)
-    print("Data folder :", data_folder_abs)
 
-    # kill premiere cũ
     os.system('taskkill /IM "Adobe Premiere Pro.exe" /F 2>nul')
     sleep(2)
 
-    # start premiere
     app = connect_or_start_premiere(premiere_exe)
     sleep(DEFAULT_STARTUP_WAIT_SEC)
 
     if not focus_window_contains(PREMIERE_WINDOW_KEYWORD):
         raise RuntimeError("Không focus được cửa sổ Premiere.")
 
-    # open project
     print("[action] Ctrl+O open project")
     send_keys("^o")
     sleep(2)
@@ -446,13 +513,11 @@ def run_premier_script(premier_path: Optional[str], project_path: str, idx: int)
     send_keys("{ENTER}")
     sleep(PROJECT_LOAD_WAIT_SEC)
 
-    # dọn popup
     for _ in range(12):
         send_keys("{ESC}")
         sleep(0.15)
     sleep(1)
 
-    # RUN JSX via VS Code (vì Premiere 2022 KHÔNG có File > Scripts)
     vscode_exe = resolve_vscode_exe()
     open_vscode_to_file(vscode_exe, jsx_path)
     vscode_run_extendscript_evaluate("Adobe Premiere Pro 2022")

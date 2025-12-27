@@ -1,32 +1,19 @@
 /**
  * getTimeline.jsx
  * ------------------------------------------
- * Các hàm hỗ trợ lấy thông tin timeline cho Video Track trong Adobe Premiere Pro.
- * Yêu cầu chạy bên trong môi trường ExtendScript của Premiere.
- *
- * YÊU CẦU NGƯỜI DÙNG: "Thực hiện lấy timeline các phần tử của v track được chọn, tạo test là phần tử v track có số thứ tự lớn nhất (ở trên cùng)"
- * Diễn giải:
- *  - Xác định các video track có clip đang được chọn (clip.isSelected())
- *  - Chọn track có chỉ số lớn nhất trong số đó (top-most / ở trên cùng trong giao diện Premiere)
- *  - Lấy danh sách clip của track đó cùng metadata (name, start, end, inPoint, outPoint)
- *  - Tạo hàm test kiểm tra rằng track được chọn dùng để xuất chính là track có index lớn nhất trong danh sách track được chọn.
- *
- * Lưu ý API:
- *  - app.project.activeSequence : Sequence hiện tại
- *  - sequence.videoTracks[num] : truy cập từng VideoTrack (0..n-1)
- *  - track.clips : mảng clip
- *  - clip.isSelected() : clip có đang được chọn trên timeline hay không
- *  - clip.start / clip.end / clip.inPoint / clip.outPoint : đối tượng Time (có thể có thuộc tính ticks / seconds tuỳ phiên bản)
+ * Export timeline ranges to DATA_FOLDER/timeline_export.json + timeline_export.csv
+ * FIX:
+ *  - NEVER fall back to _internal/data
+ *  - Prefer RUNALL_DATA_FOLDER / RUNALL_DATA_DIR / RUNALL_PATH_TXT
+ *  - If script is under .../_internal/core/premierCore, app root = parent of _internal
  */
 
-// ===== Polyfill JSON (Một số phiên bản ExtendScript/Premiere cũ không có JSON) =====
-if (typeof JSON === 'undefined') {
-	var JSON = {};
-}
+// ===== Polyfill JSON =====
+if (typeof JSON === 'undefined') { var JSON = {}; }
 if (typeof JSON.stringify !== 'function') {
 	JSON.stringify = (function(){
 		function esc(str){
-			return ('"' + str
+			return ('"' + String(str)
 				.replace(/\\/g,'\\\\')
 				.replace(/"/g,'\\"')
 				.replace(/\r/g,'\\r')
@@ -47,45 +34,42 @@ if (typeof JSON.stringify !== 'function') {
 				for (var i=0;i<v.length;i++) outA.push(stringify(v[i]));
 				return '[' + outA.join(',') + ']';
 			}
-			// object
 			var parts = [];
-			for (var k in v) if (v.hasOwnProperty(k)) {
-				parts.push(esc(k)+ ':' + stringify(v[k]));
-			}
+			for (var k in v) if (v.hasOwnProperty(k)) parts.push(esc(k)+ ':' + stringify(v[k]));
 			return '{' + parts.join(',') + '}';
 		}
-		return function(value/*, replacer, space*/){
-			return stringify(value);
-		};
+		return function(value){ return stringify(value); };
 	})();
 }
 if (typeof JSON.parse !== 'function') {
-	JSON.parse = function(txt){
-		// Cảnh báo: chỉ dùng nội bộ với dữ liệu tin cậy.
-		return eval('(' + txt + ')');
-	};
+	JSON.parse = function(txt){ return eval('(' + txt + ')'); };
 }
 
 // ===== Helpers for path + I/O =====
+function _norm(p){
+	if (!p) return '';
+	return (''+p).replace(/\\/g,'/').replace(/\/+/g,'/');
+}
 function _joinPath(a, b) {
 	if (!a || a === '') return b || '';
 	if (!b || b === '') return a || '';
 	var s = a.charAt(a.length - 1);
 	return (s === '/' || s === '\\') ? (a + b) : (a + '/' + b);
 }
-
-function _fileExists(p) {
-	try { var f = new File(p); return f.exists; } catch (e) { return false; }
+function _isAbs(p){
+	p = _norm(p);
+	return /^[A-Za-z]:\//.test(p);
 }
-
-function _folderExists(p) {
-	try { var f = new Folder(p); return f.exists; } catch (e) { return false; }
-}
-
+function _fileExists(p) { try { return (new File(p)).exists; } catch (e) { return false; } }
+function _folderExists(p) { try { return (new Folder(p)).exists; } catch (e) { return false; } }
 function _ensureFolder(p) {
-	try { var f = new Folder(p); if (!f.exists) return f.create(); return true; } catch (e) { return false; }
+	try {
+		p = _norm(p);
+		var f = new Folder(p);
+		if (!f.exists) return f.create();
+		return true;
+	} catch (e) { return false; }
 }
-
 function _readTextFile(p) {
 	try {
 		var f = new File(p);
@@ -96,15 +80,13 @@ function _readTextFile(p) {
 		return t;
 	} catch (e) { return ''; }
 }
-
-// parse text file with key=value format
 function _parsePathTxt(path) {
 	try {
 		var content = _readTextFile(path);
 		var lines = content.split('\n');
 		var cfg = {};
 		for (var i = 0; i < lines.length; i++) {
-			var line = lines[i].replace(/^\s+|\s+$/g, '');
+			var line = (lines[i] || '').replace(/^\s+|\s+$/g, '');
 			if (line === "" || line.indexOf("=") === -1) continue;
 			var parts = line.split("=");
 			if (parts.length >= 2) {
@@ -115,41 +97,73 @@ function _parsePathTxt(path) {
 		}
 		return cfg;
 	} catch (e) {
-		$.writeln("Lỗi đọc file text: " + e.message);
+		$.writeln("[getTimeline] Lỗi đọc path.txt: " + e.message);
 		return {};
 	}
 }
 
-// Try to find path.txt in multiple possible locations (for PyInstaller .exe support)
+// ✅ appRoot = dist/autotool (NOT _internal)
+function _getAppRootDirFromScript(){
+	try {
+		var full = _norm(new File($.fileName).fsName);
+		var low = full.toLowerCase();
+
+		var idxInternal = low.indexOf('/_internal/');
+		if (idxInternal !== -1) {
+			var appRootPath = full.substring(0, idxInternal);
+			return new Folder(appRootPath);
+		}
+
+		var idxCore = low.indexOf('/core/premiercore/');
+		if (idxCore !== -1) {
+			var rootPath = full.substring(0, idxCore);
+			return new Folder(rootPath);
+		}
+
+		// fallback 3 levels up
+		var f = new File($.fileName);
+		var premierCoreDir = f.parent;
+		var coreDir = premierCoreDir.parent;
+		var root = coreDir.parent;
+		return root || null;
+	} catch(e){
+		return null;
+	}
+}
+
+// Try to find path.txt in multiple possible locations
 function _findPathTxt() {
 	var possiblePaths = [];
 
-	// 1. Try from script location (works when running from VSCode)
+	// 0) Prefer override from runAll
 	try {
-		var scriptFile = new File($.fileName);
-		var premierCoreDir = scriptFile.parent;
-		var coreDir = premierCoreDir.parent;
-		var rootDir = coreDir.parent;
-		if (rootDir) {
-			// Source code location
-			possiblePaths.push(_joinPath(rootDir.fsName, 'data/path.txt'));
-			// Built .exe location (dist/autotool/data)
-			possiblePaths.push(_joinPath(rootDir.fsName, 'dist/autotool/data/path.txt'));
+		if (typeof RUNALL_PATH_TXT !== 'undefined' && RUNALL_PATH_TXT) {
+			var p0 = _norm(String(RUNALL_PATH_TXT));
+			possiblePaths.push(p0);
 		}
-	} catch (e) {}
+	} catch(e0){}
 
-	// 2. Try common Windows paths where .exe might be installed
+	// 1) app root derived from script
+	try {
+		var appRoot = _getAppRootDirFromScript(); // dist/autotool
+		if (appRoot) {
+			possiblePaths.push(_norm(_joinPath(appRoot.fsName, 'data/path.txt')));                // ✅ chuẩn
+			possiblePaths.push(_norm(_joinPath(appRoot.fsName, 'dist/autotool/data/path.txt')));  // compat
+			possiblePaths.push(_norm(_joinPath(appRoot.fsName, '_internal/data/path.txt')));      // compat cũ
+		}
+	} catch(e1){}
+
+	// 2) common paths
 	var commonPaths = [
 		'C:/toolcu/data/path.txt',
 		'D:/toolcu/data/path.txt',
 		Folder.desktop.fsName + '/toolcu/data/path.txt',
 		Folder.desktop.fsName + '/toolcu/autotool/data/path.txt',
-		Folder.desktop.fsName + '/toolcu/autotool/dist/autotool/data/path.txt',
+		Folder.desktop.fsName + '/autotool/data/path.txt',
 		Folder.myDocuments.fsName + '/toolcu/data/path.txt'
 	];
-
 	for (var i = 0; i < commonPaths.length; i++) {
-		possiblePaths.push(commonPaths[i].replace(/\\/g, '/'));
+		possiblePaths.push(_norm(commonPaths[i]));
 	}
 
 	// Try each path
@@ -160,63 +174,69 @@ function _findPathTxt() {
 			return p;
 		}
 	}
-
 	return null;
 }
 
-// ===== Xác định thư mục data theo path.txt =====
+// ===== Xác định thư mục data =====
 var DATA_FOLDER = (function () {
 	try {
-		// Try to find path.txt first (supports PyInstaller .exe)
-		var pathTxt = _findPathTxt();
 		var targetDataPath = null;
 		var rootDataPath = null;
 
-		if (pathTxt) {
-			try {
+		// ✅ 1) OVERRIDE from runAll (highest priority)
+		try {
+			if (typeof RUNALL_DATA_DIR !== 'undefined' && RUNALL_DATA_DIR) {
+				rootDataPath = _norm(String(RUNALL_DATA_DIR));
+				$.writeln('[DATA_FOLDER] Using RUNALL_DATA_DIR: ' + rootDataPath);
+			}
+			if (typeof RUNALL_DATA_FOLDER !== 'undefined' && RUNALL_DATA_FOLDER) {
+				targetDataPath = _norm(String(RUNALL_DATA_FOLDER));
+				$.writeln('[DATA_FOLDER] Using RUNALL_DATA_FOLDER: ' + targetDataPath);
+			}
+		} catch(eO){}
+
+		// ✅ 2) path.txt
+		if (!targetDataPath || !rootDataPath) {
+			var pathTxt = _findPathTxt();
+			if (pathTxt) {
 				var cfg = _parsePathTxt(pathTxt);
-				// Use data_dir from path.txt if available (set by Python GUI)
-				if (cfg && cfg.data_dir) {
-					rootDataPath = String(cfg.data_dir).replace(/\\/g, '/');
+
+				if (!rootDataPath && cfg && cfg.data_dir) {
+					rootDataPath = _norm(String(cfg.data_dir));
 					$.writeln('[DATA_FOLDER] Using data_dir from path.txt: ' + rootDataPath);
 				}
-				// Ưu tiên trường data_folder (có thể là tuyệt đối hoặc tương đối so với root/data)
-				if (cfg && cfg.data_folder) {
-					var df = String(cfg.data_folder).replace(/\\/g, '/');
-					if (_folderExists(df)) {
-						targetDataPath = df;
-					} else if (rootDataPath) {
-						targetDataPath = _joinPath(rootDataPath, df);
+
+				if (!targetDataPath) {
+					if (cfg && cfg.data_folder) {
+						var df = _norm(String(cfg.data_folder));
+						// nếu absolute -> dùng luôn, không cần exists
+						if (_isAbs(df)) {
+							targetDataPath = df;
+						} else if (rootDataPath) {
+							targetDataPath = _norm(_joinPath(rootDataPath, df));
+						}
+					} else if (cfg && cfg.project_slug && rootDataPath) {
+						targetDataPath = _norm(_joinPath(rootDataPath, String(cfg.project_slug)));
 					}
-				} else if (cfg && cfg.project_slug && rootDataPath) {
-					targetDataPath = _joinPath(rootDataPath, String(cfg.project_slug));
 				}
-			} catch (eCfg) {
-				$.writeln('[DATA_FOLDER] Lỗi đọc path.txt: ' + eCfg);
 			}
 		}
 
-		// Fallback: try from script location
+		// ✅ 3) Fallback: from script location => APP_ROOT/data (NEVER _internal/data)
 		if (!rootDataPath) {
-			try {
-				var scriptFile = new File($.fileName);
-				var premierCoreDir = scriptFile.parent;
-				var coreDir = premierCoreDir.parent;
-				var rootDir = coreDir.parent;
-				rootDataPath = rootDir.fsName + '/data';
-				$.writeln('[DATA_FOLDER] Using rootDataPath from script: ' + rootDataPath);
-			} catch (e) {
-				rootDataPath = Folder.desktop.fsName + '/toolcu/data';
+			var appRoot2 = _getAppRootDirFromScript();
+			if (appRoot2) {
+				rootDataPath = _norm(appRoot2.fsName + '/data');
+				$.writeln('[DATA_FOLDER] Fallback rootDataPath from appRoot: ' + rootDataPath);
+			} else {
+				rootDataPath = _norm(Folder.desktop.fsName + '/toolcu/data');
 				$.writeln('[DATA_FOLDER] Fallback rootDataPath to desktop: ' + rootDataPath);
 			}
 		}
 
 		_ensureFolder(rootDataPath);
 
-		// If no specific target, use root data path
-		if (!targetDataPath) {
-			targetDataPath = rootDataPath;
-		}
+		if (!targetDataPath) targetDataPath = rootDataPath;
 
 		_ensureFolder(targetDataPath);
 		var folder = new Folder(targetDataPath);
@@ -232,12 +252,12 @@ var DATA_FOLDER = (function () {
 function timeToSeconds(t) {
 	try {
 		if (!t) return 0;
-		if (typeof t.seconds !== 'undefined') return t.seconds; // API mới
-		if (typeof t.ticks !== 'undefined') { // fallback ticks -> seconds (Premiere: 254016000000 ticks = 1s) nếu cần chính xác hơn có thể điều chỉnh.
-			var TICKS_PER_SECOND = 254016000000; // hằng số nội bộ Premiere (có thể thay đổi theo version; dùng xấp xỉ)
+		if (typeof t.seconds !== 'undefined') return t.seconds;
+		if (typeof t.ticks !== 'undefined') {
+			var TICKS_PER_SECOND = 254016000000;
 			return t.ticks / TICKS_PER_SECOND;
 		}
-	} catch (e) { /* ignore */ }
+	} catch (e) {}
 	return 0;
 }
 
@@ -248,13 +268,11 @@ function getActiveSequence() {
 		return null;
 	}
 	var seq = app.project.activeSequence;
-	if (!seq) {
-		$.writeln('[getTimeline] Không có activeSequence.');
-	}
+	if (!seq) $.writeln('[getTimeline] Không có activeSequence.');
 	return seq;
 }
 
-// --------- Tìm các video track có ít nhất một clip được chọn ---------
+// --------- Tìm track có clip được chọn ---------
 function getSelectedVideoTrackIndices() {
 	var seq = getActiveSequence();
 	if (!seq) return [];
@@ -271,31 +289,25 @@ function getSelectedVideoTrackIndices() {
 			try {
 				if (clip && typeof clip.isSelected === 'function' && clip.isSelected()) {
 					indices.push(i);
-					break; // sang track kế tiếp
+					break;
 				}
-			} catch (e) { /* ignore */ }
+			} catch (e) {}
 		}
 	}
 	$.writeln('[getTimeline] Track được chọn: ' + indices.join(', '));
 	return indices;
 }
 
-// --------- Lấy index track lớn nhất trong danh sách ---------
 function getTopmostSelectedVideoTrackIndex() {
 	var sel = getSelectedVideoTrackIndices();
 	if (!sel.length) return -1;
 	var maxIdx = sel[0];
-	for (var i = 1; i < sel.length; i++) {
-		if (sel[i] > maxIdx) maxIdx = sel[i];
-	}
+	for (var i = 1; i < sel.length; i++) if (sel[i] > maxIdx) maxIdx = sel[i];
 	return maxIdx;
 }
 
-// Fallback: tìm video track đầu tiên có ít nhất 1 clip (dùng cho option A)
-// Fallback (mới): tìm video track KHÔNG RỖNG từ TRÊN XUỐNG (tức index lớn -> nhỏ)
-// Trước đây code duyệt từ 0 lên nên luôn lấy track #0 nếu có nội dung.
-// Yêu cầu người dùng: lấy "track đầu tiên có nội dung từ trên xuống".
-function findFirstNonEmptyVideoTrackIndex() { // giữ tên cũ để không phá các chỗ gọi khác
+// fallback: top non-empty from top -> bottom
+function findFirstNonEmptyVideoTrackIndex() {
 	var seq = getActiveSequence();
 	if (!seq || !seq.videoTracks) return -1;
 	for (var i = seq.videoTracks.numTracks - 1; i >= 0; i--) {
@@ -308,7 +320,6 @@ function findFirstNonEmptyVideoTrackIndex() { // giữ tên cũ để không ph�
 	return -1;
 }
 
-// --------- Lấy metadata clip của một video track theo index ---------
 function getVideoTrackClipsMetadata(trackIndex) {
 	var seq = getActiveSequence();
 	if (!seq) return [];
@@ -318,6 +329,7 @@ function getVideoTrackClipsMetadata(trackIndex) {
 	}
 	var vt = seq.videoTracks[trackIndex];
 	if (!vt || !vt.clips) return [];
+
 	function extractTextFromClip(clip) {
 		if (!clip || !clip.projectItem) return '';
 		try {
@@ -342,14 +354,15 @@ function getVideoTrackClipsMetadata(trackIndex) {
 										}
 									}
 								}
-							} catch(e1) { /* ignore param */ }
+							} catch(e1){}
 						}
 					}
 				}
 			}
-		} catch(e2) {}
+		} catch(e2){}
 		return '';
 	}
+
 	var list = [];
 	for (var c = 0; c < vt.clips.numItems; c++) {
 		var clip = vt.clips[c];
@@ -373,7 +386,6 @@ function getVideoTrackClipsMetadata(trackIndex) {
 	return list;
 }
 
-// --------- Lấy metadata của track video được chọn ở trên cùng ---------
 function getTopmostSelectedVideoTrackClips() {
 	var idx = getTopmostSelectedVideoTrackIndex();
 	if (idx < 0) {
@@ -384,7 +396,6 @@ function getTopmostSelectedVideoTrackClips() {
 	return getVideoTrackClipsMetadata(idx);
 }
 
-// --------- Test: Xác nhận track dùng để lấy clip là track có index lớn nhất ---------
 function assertTopmostSelectedVideoTrackIsMax() {
 	var sel = getSelectedVideoTrackIndices();
 	if (!sel.length) {
@@ -402,48 +413,27 @@ function assertTopmostSelectedVideoTrackIsMax() {
 	return true;
 }
 
-// --------- Helper: Xuất JSON (để panel / external đọc) ---------
 function getTopmostSelectedTrackClipsJSON(pretty) {
 	var clips = getTopmostSelectedVideoTrackClips();
-	try {
-		return JSON.stringify(clips, null, pretty ? 2 : 0);
-	} catch (e) {
-		return '[]';
-	}
+	try { return JSON.stringify(clips, null, pretty ? 2 : 0); } catch (e) { return '[]'; }
 }
 
-// --------- Example manual run (bỏ comment để test nhanh trong ExtendScript Toolkit) ---------
-// (function(){
-//     var ok = assertTopmostSelectedVideoTrackIsMax();
-//     var json = getTopmostSelectedTrackClipsJSON(true);
-//     $.writeln('Selected top track clips JSON:\n' + json);
-// })();
-
-// Expose hàm ra ngoài (để panel CEP hoặc evalScript có thể gọi)
-// Các host cũ có thể không cần, nhưng gắn vào global cho chắc.
 this.getTopmostSelectedVideoTrackClips = getTopmostSelectedVideoTrackClips;
 this.getTopmostSelectedTrackClipsJSON = getTopmostSelectedTrackClipsJSON;
 this.assertTopmostSelectedVideoTrackIsMax = assertTopmostSelectedVideoTrackIsMax;
 
-// ====== BỔ SUNG: Lấy lần lượt start-end time của tất cả phần tử trong 1 track (giả định track là text) ======
-/**
- * getSequenceFrameRate() -> số frame/second (float)
- */
+// ========= FRAME RATE / TIMECODE =========
 function getSequenceFrameRate() {
 	var seq = getActiveSequence();
-	if (!seq || typeof seq.getSettings !== 'function') return 25; // fallback mặc định
+	if (!seq || typeof seq.getSettings !== 'function') return 25;
 	try {
 		var s = seq.getSettings();
 		if (s && s.videoFrameRate && s.videoFrameRate.numerator && s.videoFrameRate.denominator) {
 			return s.videoFrameRate.numerator / s.videoFrameRate.denominator;
 		}
-	} catch (e) { /* ignore */ }
+	} catch (e) {}
 	return 25;
 }
-
-/**
- * Chuyển seconds -> timecode SMPTE đơn giản (HH:MM:SS:FF) theo frameRate.
- */
 function secondsToTimecode(seconds, frameRate) {
 	if (!frameRate) frameRate = getSequenceFrameRate();
 	var totalFrames = Math.round(seconds * frameRate);
@@ -455,22 +445,13 @@ function secondsToTimecode(seconds, frameRate) {
 	var totalMinutes = (totalSeconds - s) / 60;
 	var m = totalMinutes % 60;
 	var h = (totalMinutes - m) / 60;
-	function pad(n) { return (n < 10 ? '0' : '') + n; }
 	function pad2(n) { return (n < 10 ? '0' : '') + n; }
 	return pad2(h) + ':' + pad2(m) + ':' + pad2(s) + ':' + pad2(frames);
 }
 
-/**
- * getTrackClipRanges(trackIndex, opts)
- *  - Trả về danh sách clip (được sắp xếp theo startSeconds tăng dần) của một video track.
- *  - Mỗi phần tử gồm: {indexInTrack, name, startSeconds, endSeconds, durationSeconds, startTimecode, endTimecode}
- *  - opts.onlySelected (bool): chỉ lấy clip đang được chọn.
- *  - opts.filterRegex (string): chỉ giữ những clip có name match regex.
- *  - Vì track "toàn bộ là text" nên có thể không cần lọc, nhưng nếu muốn lọc theo tên (VD: bắt đầu bằng "TXT_"), dùng filterRegex.
- */
 function getTrackClipRanges(trackIndex, opts) {
 	opts = opts || {};
-	var includeTC = !!opts.includeTimecode; // mặc định không xuất timecode nếu không cần
+	var includeTC = !!opts.includeTimecode;
 	var seq = getActiveSequence();
 	if (!seq) return [];
 	if (!seq.videoTracks || trackIndex < 0 || trackIndex >= seq.videoTracks.numTracks) {
@@ -482,22 +463,24 @@ function getTrackClipRanges(trackIndex, opts) {
 	var frameRate = getSequenceFrameRate();
 	var list = [];
 	var regex = null;
-	if (opts.filterRegex) {
-		try { regex = new RegExp(opts.filterRegex); } catch (e) { $.writeln('[getTimeline] Regex lỗi: ' + e); }
-	}
+	if (opts.filterRegex) { try { regex = new RegExp(opts.filterRegex); } catch (e) {} }
+
 	for (var c = 0; c < vt.clips.numItems; c++) {
 		var clip = vt.clips[c];
 		if (!clip) continue;
 		if (opts.onlySelected && !(clip.isSelected && clip.isSelected())) continue;
+
 		var name = '';
 		try { name = clip.name || (clip.projectItem ? clip.projectItem.name : ''); } catch (e1) {}
 		if (regex && !regex.test(name)) continue;
+
 		var startS = timeToSeconds(clip.start);
 		var endS = timeToSeconds(clip.end);
+
 		var mediaPath = '';
-		try { if (clip.projectItem && typeof clip.projectItem.getMediaPath === 'function') { mediaPath = clip.projectItem.getMediaPath(); } } catch(e2) {}
+		try { if (clip.projectItem && typeof clip.projectItem.getMediaPath === 'function') mediaPath = clip.projectItem.getMediaPath(); } catch(e2){}
+
 		var textContent = '';
-		// tái sử dụng logic extract text (nhỏ gọn hơn):
 		try {
 			if (clip.projectItem && typeof clip.projectItem.getComponents === 'function') {
 				var comps2 = clip.projectItem.getComponents();
@@ -524,6 +507,7 @@ function getTrackClipRanges(trackIndex, opts) {
 				}
 			}
 		} catch(eTxt){}
+
 		var obj = {
 			indexInTrack: c,
 			name: name,
@@ -539,60 +523,17 @@ function getTrackClipRanges(trackIndex, opts) {
 		}
 		list.push(obj);
 	}
-	// Sắp xếp theo startSeconds
-	list.sort(function(a, b){ return a.startSeconds - b.startSeconds; });
+	list.sort(function(a,b){ return a.startSeconds - b.startSeconds; });
 	return list;
 }
 
-/**
- * getTopmostSelectedTrackClipRanges(opts)
- *  - Lấy ranges của video track được chọn ở trên cùng.
- */
-function getTopmostSelectedTrackClipRanges(opts) {
-	var idx = getTopmostSelectedVideoTrackIndex();
-	if (idx < 0) return [];
-	return getTrackClipRanges(idx, opts);
-}
-
-/**
- * getTrackClipRangesJSON(trackIndex, opts, pretty)
- */
-function getTrackClipRangesJSON(trackIndex, opts, pretty) {
-	try { return JSON.stringify(getTrackClipRanges(trackIndex, opts), null, pretty ? 2 : 0); } catch (e) { return '[]'; }
-}
-
-/**
- * getTopmostSelectedTrackClipRangesJSON(opts, pretty)
- */
-function getTopmostSelectedTrackClipRangesJSON(opts, pretty) {
-	try { return JSON.stringify(getTopmostSelectedTrackClipRanges(opts), null, pretty ? 2 : 0); } catch (e) { return '[]'; }
-}
-
-// Expose các hàm mới
-this.getTrackClipRanges = getTrackClipRanges;
-this.getTopmostSelectedTrackClipRanges = getTopmostSelectedTrackClipRanges;
-this.getTrackClipRangesJSON = getTrackClipRangesJSON;
-this.getTopmostSelectedTrackClipRangesJSON = getTopmostSelectedTrackClipRangesJSON;
-
-// ========= QUICK TEST WITH ALERT =========
-/**
- * runQuickTimelineTest(opts)
- *  - opts.trackIndex: số index track muốn test (nếu bỏ qua sẽ dùng topmost selected).
- *  - opts.onlySelected: chỉ lấy clip selected.
- *  - Thực hiện:
- *      + Xác định track
- *      + Lấy ranges
- *      + Chạy assertTopmostSelectedVideoTrackIsMax (nếu dùng chế độ auto chọn)
- *      + Alert tổng kết (PASS/FAIL, clip count, khoảng thời gian đầu/cuối)
- *  - Trả về object kết quả.
- */
 function runQuickTimelineTest(opts) {
-	// Đảm bảo không bị typo (trước đó dùng 'ops')
 	opts = opts || {};
 	var usedProvidedTrack = (typeof opts.trackIndex === 'number');
 	var trackIndex = usedProvidedTrack ? opts.trackIndex : getTopmostSelectedVideoTrackIndex();
 	var fallbackUsed = false;
-	var allowFallback = (opts.allowFallback !== false); // mặc định true
+	var allowFallback = (opts.allowFallback !== false);
+
 	if (trackIndex < 0 && !usedProvidedTrack && allowFallback) {
 		trackIndex = findFirstNonEmptyVideoTrackIndex();
 		if (trackIndex >= 0) {
@@ -600,75 +541,44 @@ function runQuickTimelineTest(opts) {
 			$.writeln('[runQuickTimelineTest] Fallback dùng track đầu tiên có clip: ' + trackIndex);
 		}
 	}
-	if (trackIndex < 0) {
-		if (typeof alert === 'function') alert('Không xác định được video track (không có clip nào được chọn hay timeline rỗng).');
-		return { ok:false, reason:'NO_TRACK', fallbackTried: allowFallback };
-	}
+	if (trackIndex < 0) return { ok:false, reason:'NO_TRACK', fallbackTried: allowFallback };
+
 	var ranges = getTrackClipRanges(trackIndex, { onlySelected: !!opts.onlySelected, includeTimecode: !!opts.includeTimecode });
 	var pass = true;
-	if (!usedProvidedTrack && !fallbackUsed) {
-		pass = assertTopmostSelectedVideoTrackIsMax();
-	}
-	var clipCount = ranges.length;
-	// Fallback: nếu không có startTimecode/endTimecode (do includeTimecode = false) thì dùng số giây raw
-	var firstStartStr = 'N/A';
-	var lastEndStr = 'N/A';
-	if (clipCount) {
-		var firstClip = ranges[0];
-		var lastClip = ranges[clipCount - 1];
-		firstStartStr = firstClip.startTimecode ? firstClip.startTimecode : (firstClip.startSeconds + 's');
-		lastEndStr = lastClip.endTimecode ? lastClip.endTimecode : (lastClip.endSeconds + 's');
-	}
-	// var summary = 'Track #' + trackIndex + ' | Clips: ' + clipCount + '\n' +
-	// 			  'Start: ' + firstStartStr + ' -> End: ' + lastEndStr + '\n' +
-	// 			  (usedProvidedTrack ? '(Track do người dùng chỉ định)\n' : (fallbackUsed ? 'Fallback Top Non-Empty Track\n' : 'Topmost Selected Track\n')) +
-	// 			  'Assertion (topmost is max): ' + (pass ? 'PASS' : 'FAIL');
-	// $.writeln('[runQuickTimelineTest]\n' + summary);
-	// if (typeof alert === 'function') {
-	// 	try { alert(summary); } catch (e) { /* ignore */ }
-	// }
-	// ===== Option D: Export JSON / CSV nếu được yêu cầu =====
+	if (!usedProvidedTrack && !fallbackUsed) pass = assertTopmostSelectedVideoTrackIsMax();
+
 	var exportResults = {};
 	if (ranges.length && (opts.exportJSONPath || opts.exportCSVPath)) {
 		function writeFile(path, content) {
 			try {
 				var f = new File(path);
 				if (f.exists) { try { f.remove(); } catch (e5) {} }
-				if (f.open('w')) {
-					f.write(content);
-					f.close();
-					return true;
-				}
-			} catch (e) {
-				$.writeln('[runQuickTimelineTest][EXPORT] Lỗi ghi file ' + path + ': ' + e);
-			}
+				if (f.open('w')) { f.write(content); f.close(); return true; }
+			} catch (e) { $.writeln('[EXPORT] Lỗi ghi ' + path + ': ' + e); }
 			return false;
 		}
+
 		if (opts.exportJSONPath) {
 			var jsonContent = JSON.stringify({ trackIndex: trackIndex, clips: ranges }, null, 2);
 			exportResults.json = writeFile(opts.exportJSONPath, jsonContent);
-			$.writeln('[runQuickTimelineTest][EXPORT] JSON -> ' + opts.exportJSONPath + ' : ' + exportResults.json);
-			if (!exportResults.json && typeof alert === 'function') {
-				try { alert('JSON export FAILED: ' + opts.exportJSONPath + '\nHãy kiểm tra quyền ghi thư mục này.'); } catch(ea) {}
-			}
+			$.writeln('[EXPORT] JSON -> ' + opts.exportJSONPath + ' : ' + exportResults.json);
 		}
 		if (opts.exportCSVPath) {
-			var header;
 			var haveTC = !!opts.includeTimecode;
-			if (haveTC) {
-				header = 'indexInTrack,name,startSeconds,endSeconds,durationSeconds,startTimecode,endTimecode,mediaPath,textContent';
-			} else {
-				header = 'indexInTrack,name,startSeconds,endSeconds,durationSeconds,mediaPath,textContent';
-			}
+			var header = haveTC
+				? 'indexInTrack,name,startSeconds,endSeconds,durationSeconds,startTimecode,endTimecode,mediaPath,textContent'
+				: 'indexInTrack,name,startSeconds,endSeconds,durationSeconds,mediaPath,textContent';
 			var lines = [header];
 			for (var i = 0; i < ranges.length; i++) {
 				var r = ranges[i];
-				var name = (r.name||'').replace(/"/g,'""');
-				if (name.indexOf(',') >= 0) name = '"' + name + '"';
-				var media = (r.mediaPath||'').replace(/"/g,'""');
-				if (media.indexOf(',') >= 0) media = '"' + media + '"';
-				var txt = (r.textContent||'').replace(/"/g,'""');
-				if (txt.indexOf(',') >= 0) txt = '"' + txt + '"';
+				function escCSV(s){
+					s = (s || '').replace(/"/g,'""');
+					if (s.indexOf(',') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) s = '"' + s + '"';
+					return s;
+				}
+				var name = escCSV(r.name);
+				var media = escCSV(r.mediaPath);
+				var txt = escCSV(r.textContent);
 				if (haveTC) {
 					lines.push([r.indexInTrack, name, r.startSeconds, r.endSeconds, r.durationSeconds, r.startTimecode||'', r.endTimecode||'', media, txt].join(','));
 				} else {
@@ -676,33 +586,19 @@ function runQuickTimelineTest(opts) {
 				}
 			}
 			exportResults.csv = writeFile(opts.exportCSVPath, lines.join('\n'));
-			$.writeln('[runQuickTimelineTest][EXPORT] CSV -> ' + opts.exportCSVPath + ' : ' + exportResults.csv);
-			if (!exportResults.csv && typeof alert === 'function') {
-				try { alert('CSV export FAILED: ' + opts.exportCSVPath + '\nHãy kiểm tra quyền ghi thư mục này.'); } catch(ec) {}
-			}
+			$.writeln('[EXPORT] CSV -> ' + opts.exportCSVPath + ' : ' + exportResults.csv);
 		}
 	}
-	return {
-		ok: pass,
-		trackIndex: trackIndex,
-		clipCount: clipCount,
-		firstTimecode: firstStartStr,
-		lastTimecode: lastEndStr,
-		usedProvidedTrack: usedProvidedTrack,
-		fallbackUsed: fallbackUsed,
-		ranges: ranges,
-		exports: exportResults
-	};
+	return { ok: pass, trackIndex: trackIndex, ranges: ranges, exports: exportResults };
 }
 
 this.runQuickTimelineTest = runQuickTimelineTest;
 
-// Auto-run quick test when script loaded (comment out if not desired)
-// Lưu file JSON/CSV ngay trong cùng thư mục code (thư mục chứa script này) để dễ tìm.
+// Auto-run export
 (function(){
 	try {
-		var jsonPath = DATA_FOLDER.fsName + '/timeline_export.json';
-		var csvPath  = DATA_FOLDER.fsName + '/timeline_export.csv';
+		var jsonPath = _norm(DATA_FOLDER.fsName + '/timeline_export.json');
+		var csvPath  = _norm(DATA_FOLDER.fsName + '/timeline_export.csv');
 		$.writeln('[auto-run] Xuất timeline ra: ' + jsonPath + ' và ' + csvPath);
 		runQuickTimelineTest({
 			onlySelected: false,
@@ -713,16 +609,3 @@ this.runQuickTimelineTest = runQuickTimelineTest;
 		$.writeln('[auto-run] Lỗi auto export: ' + e);
 	}
 })();
-
-// Helper để kiểm tra nhanh đường dẫn script & thử ghi 1 file test
-function debugCheckScriptPath() {
-    try {
-        var f = new File($.fileName);
-        $.writeln('[debugCheckScriptPath] Script path: ' + f.fsName);
-        var testFile = new File(f.path + '/_write_test.txt');
-        if (testFile.open('w')) { testFile.write('test'); testFile.close(); $.writeln('[debugCheckScriptPath] Ghi test OK: ' + testFile.fsName); }
-        else $.writeln('[debugCheckScriptPath] Không mở được file test để ghi');
-    } catch(e) { $.writeln('[debugCheckScriptPath] Lỗi: ' + e); }
-}
-this.debugCheckScriptPath = debugCheckScriptPath;
-
